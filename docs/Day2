@@ -1,0 +1,238 @@
+## Day 2 — First Spring Boot Microservice
+
+Day 2 was about taking the environment we prepared on Day 1 and building the **first working backend service** for our Enterprise Financial Data Platform.
+
+The main goal was simple:
+
+> **Create `customer-service`, run it successfully, expose an API, and verify that the service is healthy.**
+
+### 1. Created the backend structure
+
+We started with a clean project structure:
+
+```text
+enterprise-financial-data-platform/
+└── backend/
+    └── customer-service/
+```
+
+`customer-service` is our first microservice. Eventually it will handle customer creation, updates, retrieval, validation, database operations, and customer-related events.
+
+### 2. Created the Spring Boot project
+
+We generated the service using Spring Initializr with:
+
+```text
+Build Tool     : Maven
+Language       : Java
+Java           : 21
+Packaging      : JAR
+
+Group          : com.financialplatform
+Artifact       : customer-service
+Package        : com.financialplatform.customer
+```
+
+We selected four initial dependencies:
+
+**Spring Web** — gives us Spring MVC, REST controller support, JSON handling, and embedded Tomcat.
+
+**Spring Boot Actuator** — provides operational endpoints such as application health.
+
+**Validation** — we'll use this soon to validate incoming customer requests.
+
+**Lombok** — will reduce repetitive Java code such as getters, setters, constructors, and builders.
+
+We intentionally **didn't add Oracle, Kafka, Redis, Security, AWS, etc. yet**. We'll introduce each technology when the project actually needs it.
+
+### 3. Started the application
+
+Our main class is:
+
+```text
+CustomerServiceApplication
+```
+
+When we ran it, Spring Boot started its embedded Tomcat server on:
+
+```text
+localhost:8080
+```
+
+The important console messages were essentially:
+
+```text
+Tomcat started on port 8080
+Started CustomerServiceApplication
+```
+
+This proved that Java, Maven, Spring Boot, our dependencies, and the embedded web server were all configured correctly.
+
+### 4. Added application configuration
+
+We decided to use:
+
+```text
+application.properties
+```
+
+instead of YAML.
+
+We configured the service name, port `8080`, and Actuator endpoint exposure.
+
+This file will grow later when we introduce database connections, Kafka, security, logging, environment profiles, and other configurations.
+
+### 5. Tested Spring Boot Actuator
+
+We tested:
+
+```text
+GET http://localhost:8080/actuator/health
+```
+
+and received:
+
+```text
+200 OK
+```
+
+with the application reporting an `UP` status.
+
+This is more important than it initially looks.
+
+In production, systems such as **Kubernetes and monitoring platforms** need a reliable way to determine whether an application instance is healthy.
+
+Later we'll build on this with:
+
+```text
+Liveness
+Readiness
+Metrics
+Prometheus
+Grafana
+CloudWatch
+```
+
+So Actuator is our first small step toward **production observability**.
+
+### 6. Created our first REST Controller
+
+We created:
+
+```text
+com.financialplatform.customer
+└── controller
+    └── CustomerController
+```
+
+and exposed:
+
+```text
+GET /api/v1/customers/health
+```
+
+We deliberately used:
+
+```text
+/api/v1/
+```
+
+because we're establishing an **API versioning convention** from the beginning.
+
+### 7. Tested our API using Postman
+
+We called:
+
+```text
+GET http://localhost:8080/api/v1/customers/health
+```
+
+and received:
+
+```text
+200 OK
+```
+
+with a JSON response confirming that `customer-service` was running.
+
+That verified our first complete HTTP flow:
+
+```text
+Postman
+   ↓
+HTTP Request
+   ↓
+Tomcat :8080
+   ↓
+Spring DispatcherServlet
+   ↓
+CustomerController
+   ↓
+Java Method
+   ↓
+ResponseEntity
+   ↓
+JSON Response
+   ↓
+Postman
+```
+
+### 8. Understood the important annotations
+
+We introduced several fundamental Spring concepts.
+
+**`@RestController`** tells Spring that the class handles REST API requests and returns response data.
+
+**`@RequestMapping`** defines the base URL for the controller.
+
+**`@GetMapping`** maps an HTTP GET request to a Java method.
+
+**`ResponseEntity`** allows us to control the HTTP response, including status code and response body.
+
+These concepts will appear throughout almost every Spring Boot REST API we build.
+
+### 9. Followed a Git feature workflow
+
+Instead of developing directly in `main`, we used:
+
+```text
+main
+ ↑
+develop
+ ↑
+feature/customer-service-setup
+```
+
+Our feature work was committed and pushed to GitHub.
+
+This is important because we're not treating GitHub simply as a place to store code. We're practicing a development workflow closer to what we'd use on a software team.
+
+### Day 2 result
+
+At the beginning of Day 2:
+
+```text
+Development Environment
+```
+
+At the end:
+
+```text
+Enterprise Financial Data Platform
+              ↓
+            Backend
+              ↓
+       Customer Service
+              ↓
+    Java 21 + Spring Boot
+              ↓
+        Embedded Tomcat
+              ↓
+       ┌──────┴──────┐
+       ↓             ↓
+   Actuator       REST API
+       ↓             ↓
+    Health       Controller
+       └──────┬──────┘
+              ↓
+           200 OK
