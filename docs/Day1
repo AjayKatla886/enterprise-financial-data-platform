@@ -1,0 +1,133 @@
+## Day 1 — Development Environment Setup
+
+Day 1 was completely focused on **preparing our development environment**. We didn't write application code yet. The goal was to make sure every tool we need for the Enterprise Financial Data Platform is installed and working before development begins.
+
+### What we set up
+
+**1. Java 21 (JDK)**
+Java is the main programming language for our backend microservices. We installed **JDK 21** because the project will use modern Java features and current Spring Boot versions.
+
+We verified it using:
+
+```bash
+java -version
+javac -version
+```
+
+**2. IntelliJ IDEA**
+IntelliJ is our primary IDE. We'll use it to develop Spring Boot microservices, manage Maven dependencies, run/debug applications, write tests, and work with Git.
+
+**3. Apache Maven**
+Maven is our backend build and dependency-management tool. It will manage Spring Boot libraries, compile the Java application, execute tests, package services as JAR files, and later participate in our CI/CD pipeline.
+
+We verified it with:
+
+```bash
+mvn -version
+```
+
+**4. Git**
+Git provides version control. Instead of keeping code only on the local machine, every meaningful change will have a history.
+
+We verified:
+
+```bash
+git --version
+```
+
+**5. GitHub**
+We created the central repository for the complete project:
+
+[Enterprise Financial Data Platform GitHub Repository](https://github.com/AjayKatla886/enterprise-financial-data-platform?utm_source=chatgpt.com)
+
+Our branching approach is:
+
+```text
+main
+  ↑
+develop
+  ↑
+feature/*
+```
+
+`main` represents stable code, `develop` is our integration branch, and individual development work happens on feature branches.
+
+**6. Postman**
+Postman will be our main tool for manually testing REST APIs. As we develop the project, we'll use it for GET, POST, PUT and DELETE requests, validation testing, authentication tokens, headers, error scenarios, and eventually API Gateway testing.
+
+**7. Docker Desktop**
+Docker was installed now even though we aren't containerizing anything on Day 1. Later we'll use Docker to package our microservices and run supporting infrastructure locally.
+
+We verified Docker using:
+
+```bash
+docker --version
+docker ps
+```
+
+**8. Node.js and npm**
+Our frontend will eventually be built with Angular. Angular development requires Node.js, and npm manages frontend dependencies.
+
+We verified:
+
+```bash
+node --version
+npm --version
+```
+
+**9. Angular CLI**
+Angular CLI was installed so that later we can create, run, build, and test the Angular frontend.
+
+We verified it using:
+
+```bash
+ng version
+```
+
+### Why spend a full day on setup?
+
+In a real project, development doesn't begin with immediately writing a controller. A developer first needs a reliable local environment.
+
+Our basic development lifecycle will eventually look like:
+
+```text
+Requirement
+    ↓
+Git Feature Branch
+    ↓
+IntelliJ
+    ↓
+Java / Spring Boot Development
+    ↓
+Maven Build
+    ↓
+JUnit Testing
+    ↓
+Postman API Testing
+    ↓
+Git Commit / Pull Request
+    ↓
+Docker
+    ↓
+CI/CD
+    ↓
+Kubernetes / AWS
+```
+
+Day 1 established the tools required to support that lifecycle.
+
+### Day 1 result
+
+By the end of Day 1, we had:
+
+```text
+Java 21          ✅
+IntelliJ IDEA    ✅
+Maven            ✅
+Git              ✅
+GitHub           ✅
+Postman          ✅
+Docker Desktop   ✅
+Node.js          ✅
+npm              ✅
+Angular CLI      ✅
