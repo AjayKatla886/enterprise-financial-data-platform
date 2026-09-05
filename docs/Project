@@ -1,0 +1,331 @@
+# Enterprise Financial Data Platform
+
+A production-oriented Java Full Stack project designed to simulate the architecture, engineering practices, and development lifecycle used in modern enterprise financial applications.
+
+The project is being built incrementally as a real-world learning and portfolio project, with a focus on backend engineering, microservices, cloud, event-driven systems, databases, DevOps, observability, security, and frontend development.
+
+## Project Goal
+
+The goal of this project is to build a complete enterprise financial platform from scratch and understand how different technologies work together in a production-style environment.
+
+The platform will eventually support:
+
+- Customer Management
+- Account Management
+- Transaction Processing
+- Authentication and Authorization
+- Event-Driven Processing
+- Batch Processing
+- Notifications
+- Audit Tracking
+- Reporting and Analytics
+- Operational Dashboards
+- Monitoring and Production Support
+
+## Project Status
+
+**Status:** In Development
+
+**Current Progress:** Day 2 of 150
+
+### Completed
+
+- Development environment setup
+- Git and GitHub repository setup
+- Initial backend project structure
+- Customer Service Spring Boot application
+- REST API foundation
+- Spring Boot Actuator health monitoring
+- Application configuration
+- Postman API verification
+- Git feature branch workflow
+
+## High-Level Architecture
+
+The platform will gradually evolve into a microservices-based architecture.
+
+Expected flow:
+
+User
+→ Angular Frontend
+→ API Gateway
+→ Spring Boot Microservices
+→ Oracle / Redis / Kafka
+→ Notification, Audit and Reporting Services
+→ Snowflake Analytics
+
+The application will later be deployed using Docker, Kubernetes, AWS, CI/CD pipelines, and Infrastructure as Code.
+
+## Planned Microservices
+
+- API Gateway
+- Authentication Service
+- Customer Service
+- Account Service
+- Transaction Service
+- Batch Service
+- Notification Service
+- Reporting Service
+- Audit Service
+
+Each service will be introduced only when there is a real business or technical requirement for it.
+
+## Technology Stack
+
+### Backend
+- Java 21
+- Spring Boot
+- Spring Web
+- Spring Data JPA
+- Spring Security
+- Spring Batch
+- Hibernate
+- Maven
+
+### API
+- REST APIs
+- JSON
+- API Versioning
+- OpenAPI / Swagger
+
+### Messaging
+- Apache Kafka
+
+### Databases
+- Oracle
+- Snowflake
+
+### Caching and Resiliency
+- Redis
+- Resilience4j
+
+### Frontend
+- Angular
+- TypeScript
+- HTML
+- CSS
+
+### Cloud
+- AWS
+- Amazon EKS
+- Amazon ECR
+- Amazon S3
+- Amazon MSK
+- IAM
+- Secrets Manager
+- CloudWatch
+- Application Load Balancer
+- Route 53
+
+### DevOps
+- Git
+- GitHub
+- Docker
+- Kubernetes
+- GitHub Actions
+- Jenkins
+- Terraform
+
+### Monitoring
+- Spring Boot Actuator
+- Prometheus
+- Grafana
+- Centralized Logging
+- Distributed Tracing
+- AWS CloudWatch
+
+### Testing
+- JUnit 5
+- Mockito
+- Integration Testing
+- Testcontainers
+- API Testing
+
+## Current Repository Structure
+
+- `backend` — Spring Boot microservices
+- `frontend` — Angular application
+- `database` — Database scripts and schemas
+- `infrastructure` — Docker, Kubernetes, Terraform and deployment files
+- `docs` — Architecture and project documentation
+
+Currently, the first backend microservice being developed is `customer-service`.
+
+## Customer Service
+
+Customer Service is the first microservice in the platform.
+
+It will eventually be responsible for:
+
+- Creating customers
+- Retrieving customer information
+- Updating customer information
+- Customer validation
+- Customer status management
+- Customer persistence
+- Publishing customer-related events
+- Audit integration
+
+Current implementation includes the initial Spring Boot setup, service configuration, REST endpoint, and Actuator health monitoring.
+
+## Development Approach
+
+This project follows an incremental development approach.
+
+Instead of creating every service and technology at the beginning, each component is introduced when it solves a specific business or engineering requirement.
+
+Examples:
+
+- Kafka for asynchronous event-driven communication
+- Redis for caching and performance improvement
+- Oracle for transactional operational data
+- Snowflake for analytics and reporting
+- Spring Batch for large-volume file processing
+- AWS S3 for file storage
+- Resilience4j for fault tolerance
+- Kubernetes for container orchestration
+- Terraform for infrastructure provisioning
+- Prometheus and Grafana for monitoring
+
+## Git Branching Strategy
+
+The project follows a simple professional branching model:
+
+- `main` — stable or production-ready code
+- `develop` — integration branch
+- `feature/*` — individual development work
+
+Feature development is completed in a feature branch and merged into `develop` through a Pull Request.
+
+Stable releases will eventually be promoted from `develop` to `main`.
+
+## Development Roadmap
+
+### Phase 1 — Foundation
+Environment setup, repository structure, Spring Boot setup, API standards, Git workflow, project architecture.
+
+### Phase 2 — Customer Management
+Customer domain, DTOs, service layer, repository layer, Oracle integration, validation, exception handling, CRUD APIs, testing.
+
+### Phase 3 — Account and Transaction Services
+Account management, transaction workflows, service communication, financial processing.
+
+### Phase 4 — Security
+Spring Security, JWT, OAuth 2.0, authentication, authorization, RBAC.
+
+### Phase 5 — Event-Driven Architecture
+Kafka producers, consumers, event design, retries, dead-letter handling, idempotency.
+
+### Phase 6 — Batch Processing
+Spring Batch, file ingestion, chunk processing, validation, retries, skip handling, batch monitoring.
+
+### Phase 7 — AWS File Integration
+Amazon S3 and cloud-based file handling.
+
+### Phase 8 — Analytics
+Snowflake integration, reporting and analytical workloads.
+
+### Phase 9 — Frontend
+Angular application, customer screens, account screens, transaction screens and dashboards.
+
+### Phase 10 — Performance and Resiliency
+Redis caching, circuit breakers, retries, rate limiting, timeout handling.
+
+### Phase 11 — Containers and Kubernetes
+Docker, Docker Compose, Kubernetes deployments, services, configuration and secrets.
+
+### Phase 12 — AWS Deployment
+EKS, ECR, MSK, IAM, networking, Secrets Manager, CloudWatch and load balancing.
+
+### Phase 13 — CI/CD and Infrastructure
+GitHub Actions, Jenkins, Terraform and automated deployments.
+
+### Phase 14 — Production Readiness
+Observability, centralized logging, tracing, performance testing, security review, integration testing and production hardening.
+
+## Current Milestone
+
+### Day 1
+Development environment and required tools were installed and verified.
+
+### Day 2
+The first Spring Boot `customer-service` was created and successfully started.
+
+The service currently includes:
+
+- Java 21
+- Spring Boot
+- Maven
+- Spring Web
+- Validation
+- Lombok
+- Spring Boot Actuator
+- REST API foundation
+- Health monitoring
+- Application configuration
+- Postman verification
+- Git feature branch workflow
+
+## Engineering Principles
+
+The project will follow:
+
+- Clean Code
+- Separation of Concerns
+- Layered Architecture
+- API Versioning
+- DTO-based API contracts
+- Input Validation
+- Centralized Exception Handling
+- Secure Configuration
+- Environment-specific Configuration
+- Automated Testing
+- Observability
+- Fault Tolerance
+- Event-Driven Design
+- Idempotent Processing
+- CI/CD
+- Infrastructure as Code
+- Code Reviews
+- Documentation
+
+## Learning Objective
+
+The primary objective is to understand the complete software engineering lifecycle:
+
+Requirement
+→ Design
+→ Development
+→ Code Review
+→ Testing
+→ Build
+→ Containerization
+→ CI/CD
+→ Cloud Deployment
+→ Monitoring
+→ Troubleshooting
+→ Continuous Improvement
+
+By the end of this project, the repository should demonstrate how Java, Spring Boot, Microservices, Kafka, Oracle, Snowflake, Angular, AWS, Docker, Kubernetes, Terraform, CI/CD, testing, security, resiliency and observability work together in an enterprise financial application.
+
+## Project Progress
+
+| Day | Topic | Status |
+|---|---|---|
+| Day 1 | Development Environment Setup | Complete |
+| Day 2 | Customer Service Initialization | Complete |
+| Day 3 | Customer Domain Development | Next |
+| Day 4+ | Incremental Project Development | Planned |
+
+## Repository
+
+GitHub Repository:
+
+https://github.com/AjayKatla886/enterprise-financial-data-platform.git
+
+## Author
+
+**Ajay Katla**
+
+Enterprise Financial Data Platform
+150-Day Java Full Stack Production Project
