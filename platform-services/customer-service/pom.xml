@@ -40,6 +40,12 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc11</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Health and Monitoring -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
