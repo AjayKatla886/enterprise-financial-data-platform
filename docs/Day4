@@ -1,0 +1,1039 @@
+# Day 4 - Customer Domain Model & Oracle Persistence
+
+## Enterprise Financial Data Platform
+
+### Objective
+
+The goal of Day 4 was to move the Customer Service from a basic Spring Boot service into a real database-backed microservice.
+
+The Customer Service was integrated with Oracle using Spring Data JPA and Hibernate. A Customer domain entity, repository layer, service layer, and database-backed REST API were implemented and tested end-to-end.
+
+---
+
+## 1. Architecture Implemented
+
+The Customer Service now follows a standard layered Spring Boot architecture.
+
+```text
+Postman / Future Angular UI
+          |
+          | HTTP Request
+          v
+CustomerController
+          |
+          v
+CustomerService
+          |
+          v
+CustomerRepository
+          |
+          v
+Spring Data JPA
+          |
+          v
+JPA
+          |
+          v
+Hibernate
+          |
+          v
+Oracle JDBC Driver
+          |
+          v
+Oracle Database - FREEPDB1
+          |
+          v
+CUSTOMERS Table
+```
+
+Each layer has a separate responsibility.
+
+- Controller handles HTTP requests and responses.
+- Service coordinates business logic.
+- Repository handles persistence operations.
+- Spring Data JPA provides repository abstractions.
+- JPA defines the persistence standard.
+- Hibernate implements JPA and performs object-relational mapping.
+- JDBC provides database connectivity.
+- Oracle stores the actual customer records.
+
+---
+
+## 2. Day 4 Project Structure
+
+The Customer Service was expanded with entity, repository, and service layers.
+
+```text
+enterprise-financial-data-platform/
+|
+├── platform-services/
+│   |
+│   ├── pom.xml
+│   |
+│   ├── platform-common/
+│   │   ├── pom.xml
+│   │   └── src/main/java/com/financialplatform/common/
+│   │       ├── constants/
+│   │       │   └── ApplicationConstants.java
+│   │       └── response/
+│   │           └── ApiResponse.java
+│   |
+│   └── customer-service/
+│       ├── pom.xml
+│       └── src/main/
+│           ├── java/com/financialplatform/customer/
+│           │   ├── CustomerServiceApplication.java
+│           │   ├── controller/
+│           │   │   └── CustomerController.java
+│           │   ├── entity/
+│           │   │   └── Customer.java
+│           │   ├── repository/
+│           │   │   └── CustomerRepository.java
+│           │   └── service/
+│           │       └── CustomerService.java
+│           │
+│           └── resources/
+│               └── application.properties
+│
+├── database/
+│   ├── oracle/
+│   └── snowflake/
+│
+├── docs/
+├── infrastructure/
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
+---
+
+## 3. Spring Data JPA
+
+Spring Data JPA was added to the Customer Service.
+
+Spring Data JPA provides an abstraction over JPA and reduces the amount of repetitive persistence code required in an application.
+
+Instead of manually writing JDBC code for every database operation, repositories can extend Spring Data interfaces such as:
+
+```java
+JpaRepository<Customer, Long>
+```
+
+This automatically provides operations such as:
+
+```text
+save()
+findById()
+findAll()
+deleteById()
+existsById()
+count()
+```
+
+This will allow the Customer Service to implement database operations without writing repetitive SQL for basic CRUD operations.
+
+---
+
+## 4. JPA
+
+JPA stands for Jakarta Persistence API.
+
+JPA is a specification that defines how Java objects can be mapped to relational database tables.
+
+JPA itself does not perform the database operations.
+
+It defines annotations and APIs such as:
+
+```text
+@Entity
+@Table
+@Id
+@GeneratedValue
+@Column
+```
+
+Hibernate is used as the JPA implementation.
+
+---
+
+## 5. Hibernate
+
+Hibernate is the ORM framework used by the Customer Service.
+
+ORM means Object Relational Mapping.
+
+Hibernate maps Java objects to database tables.
+
+For example:
+
+```text
+Java
+Customer.java
+
+        ↓ Hibernate
+
+Oracle
+CUSTOMERS table
+```
+
+When the repository executes:
+
+```java
+customerRepository.findAll();
+```
+
+Hibernate can generate the required SQL, execute it against Oracle, retrieve the rows, and convert those rows into Customer Java objects.
+
+---
+
+## 6. Oracle JDBC Driver
+
+The Oracle JDBC driver was added to the Customer Service.
+
+The JDBC driver allows the Java application to communicate with Oracle.
+
+The complete persistence path is:
+
+```text
+Spring Boot
+    ↓
+Spring Data JPA
+    ↓
+Hibernate
+    ↓
+JDBC
+    ↓
+Oracle JDBC Driver
+    ↓
+Oracle Database
+```
+
+The JDBC driver is required at application runtime.
+
+---
+
+## 7. Local Oracle Environment
+
+Oracle Free was configured as the local development database.
+
+Oracle runs inside Docker.
+
+Docker container:
+
+```text
+financial-oracle
+```
+
+Oracle service:
+
+```text
+FREEPDB1
+```
+
+Connection configuration:
+
+```text
+Host: localhost
+Port: 1521
+Service Name: FREEPDB1
+Database User: financial_user
+```
+
+Oracle SQL Developer was also configured so the database and schema could be inspected and managed directly.
+
+IntelliJ Database Tools were connected to the same Oracle database for development-time database inspection.
+
+---
+
+## 8. Oracle Database User
+
+A dedicated application database user was created:
+
+```text
+financial_user
+```
+
+This account is used by the Customer Service instead of using the Oracle SYSTEM account.
+
+The required development privileges were configured so the user could connect and create the required database objects.
+
+This keeps application-level database access separate from Oracle administrative access.
+
+---
+
+## 9. CUSTOMERS Table
+
+The first business table of the Enterprise Financial Data Platform was created.
+
+```sql
+CREATE TABLE CUSTOMERS (
+    CUSTOMER_ID NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    CUSTOMER_NUMBER VARCHAR2(30) NOT NULL UNIQUE,
+    FIRST_NAME VARCHAR2(100) NOT NULL,
+    LAST_NAME VARCHAR2(100) NOT NULL,
+    EMAIL VARCHAR2(150) NOT NULL UNIQUE,
+    PHONE_NUMBER VARCHAR2(20),
+    DATE_OF_BIRTH DATE,
+    CUSTOMER_STATUS VARCHAR2(20) NOT NULL,
+    CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UPDATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+```
+
+The table was verified successfully in Oracle.
+
+---
+
+## 10. Customer Domain Model
+
+A Customer entity was created to represent customer information inside the Java application.
+
+Location:
+
+```text
+customer/entity/Customer.java
+```
+
+The entity maps Java fields to columns in the Oracle `CUSTOMERS` table.
+
+| Java Field | Oracle Column | Purpose |
+|---|---|---|
+| customerId | CUSTOMER_ID | Database primary key |
+| customerNumber | CUSTOMER_NUMBER | Unique business customer number |
+| firstName | FIRST_NAME | Customer first name |
+| lastName | LAST_NAME | Customer last name |
+| email | EMAIL | Customer email |
+| phoneNumber | PHONE_NUMBER | Customer phone number |
+| dateOfBirth | DATE_OF_BIRTH | Customer date of birth |
+| customerStatus | CUSTOMER_STATUS | Customer status |
+| createdAt | CREATED_AT | Creation timestamp |
+| updatedAt | UPDATED_AT | Last update timestamp |
+
+---
+
+## 11. JPA Entity Annotations
+
+The Customer class uses JPA annotations.
+
+### @Entity
+
+```java
+@Entity
+```
+
+Marks the Java class as a persistent JPA entity.
+
+---
+
+### @Table
+
+```java
+@Table(name = "CUSTOMERS")
+```
+
+Maps the Customer entity to the Oracle `CUSTOMERS` table.
+
+---
+
+### @Id
+
+```java
+@Id
+```
+
+Identifies the primary key of the entity.
+
+---
+
+### @GeneratedValue
+
+```java
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+```
+
+Indicates that the database generates the primary-key value.
+
+---
+
+### @Column
+
+Example:
+
+```java
+@Column(name = "CUSTOMER_NUMBER", nullable = false, unique = true)
+```
+
+Maps a Java field to a specific database column and allows persistence constraints to be described.
+
+---
+
+## 12. Lombok Getter and Setter
+
+The Customer entity uses:
+
+```java
+@Getter
+@Setter
+```
+
+These are Lombok annotations.
+
+Lombok generates getter and setter methods during compilation and avoids writing repetitive accessor methods manually.
+
+The Customer entity also keeps a no-argument constructor because JPA requires an accessible no-argument constructor when creating entity instances.
+
+---
+
+## 13. Customer Repository
+
+A repository was created:
+
+```text
+customer/repository/CustomerRepository.java
+```
+
+The repository extends:
+
+```java
+JpaRepository<Customer, Long>
+```
+
+`Customer` represents the entity managed by the repository.
+
+`Long` represents the Java type of the Customer primary key.
+
+Spring Data JPA creates the repository implementation automatically at runtime.
+
+The application therefore does not need to manually implement common persistence operations.
+
+---
+
+## 14. Customer Service
+
+A service layer was created:
+
+```text
+customer/service/CustomerService.java
+```
+
+The Customer Service sits between the REST controller and repository.
+
+Current methods include:
+
+```java
+getAllCustomers()
+getCustomerById()
+```
+
+The service communicates with `CustomerRepository` instead of communicating directly with Hibernate or Oracle.
+
+This gives the application the following separation:
+
+```text
+Controller
+    ↓
+Business/Application Logic
+    ↓
+Service
+    ↓
+Persistence Access
+    ↓
+Repository
+```
+
+Future customer business rules will be implemented primarily in the service layer.
+
+---
+
+## 15. Dependency Injection
+
+`CustomerRepository` is injected into `CustomerService`.
+
+`CustomerService` is injected into `CustomerController`.
+
+Constructor injection is used.
+
+Conceptually:
+
+```text
+Spring Container
+      |
+      ├── creates CustomerRepository
+      |
+      ├── injects repository into CustomerService
+      |
+      └── injects CustomerService into CustomerController
+```
+
+This avoids manually creating dependencies with `new`.
+
+Constructor injection makes dependencies explicit and makes components easier to test.
+
+Because each class currently has a single constructor, Spring can perform constructor injection without requiring `@Autowired`.
+
+---
+
+## 16. Customer REST Controller
+
+The Customer Controller exposes the Customer Service through REST APIs.
+
+Base URL:
+
+```text
+/api/v1/customers
+```
+
+The controller delegates database-related operations to `CustomerService`.
+
+The controller does not directly access Oracle or `CustomerRepository`.
+
+This maintains separation between the API layer and persistence layer.
+
+---
+
+## 17. Get All Customers API
+
+The first database-backed Customer API was implemented.
+
+```http
+GET /api/v1/customers
+```
+
+Execution flow:
+
+```text
+GET /api/v1/customers
+        ↓
+CustomerController
+        ↓
+CustomerService.getAllCustomers()
+        ↓
+CustomerRepository.findAll()
+        ↓
+Spring Data JPA
+        ↓
+Hibernate
+        ↓
+Oracle JDBC
+        ↓
+CUSTOMERS table
+        ↓
+Database rows returned
+        ↓
+Hibernate converts rows to Customer objects
+        ↓
+CustomerService
+        ↓
+CustomerController
+        ↓
+ApiResponse<List<Customer>>
+        ↓
+Jackson converts Java objects to JSON
+        ↓
+HTTP 200 OK
+```
+
+---
+
+## 18. Shared API Response
+
+The Customer API continues to use the shared `ApiResponse<T>` created inside `platform-common`.
+
+The API therefore returns a consistent structure:
+
+```json
+{
+  "success": true,
+  "message": "Customers fetched successfully",
+  "data": []
+}
+```
+
+This demonstrates that the shared module created during Day 3 is now being reused by the Customer Service.
+
+---
+
+## 19. Test Customer
+
+A test customer was inserted directly into Oracle to verify the complete persistence flow.
+
+Example test record:
+
+```text
+Customer Number: CUST1001
+First Name: Ajay
+Last Name: Katla
+Email: ajay.test@example.com
+Phone: 5551234567
+Date of Birth: 1995-01-15
+Status: ACTIVE
+```
+
+The row was confirmed directly in Oracle before testing the REST API.
+
+---
+
+## 20. Successful API Response
+
+The following endpoint was tested using Postman:
+
+```http
+GET http://localhost:8080/api/v1/customers
+```
+
+The request returned:
+
+```text
+HTTP 200 OK
+```
+
+Example response:
+
+```json
+{
+  "success": true,
+  "message": "Customers fetched successfully",
+  "data": [
+    {
+      "createdAt": "2026-09-06T14:11:19.82284",
+      "customerId": 1,
+      "customerNumber": "CUST1001",
+      "customerStatus": "ACTIVE",
+      "dateOfBirth": "1995-01-15",
+      "email": "ajay.test@example.com",
+      "firstName": "Ajay",
+      "lastName": "Katla",
+      "phoneNumber": "5551234567",
+      "updatedAt": "2026-09-06T14:11:19.82284"
+    }
+  ]
+}
+```
+
+This confirmed the complete database-to-REST flow.
+
+---
+
+## 21. Application Configuration
+
+The Customer Service contains its own:
+
+```text
+application.properties
+```
+
+The service contains configuration for:
+
+- Application name
+- Server port
+- Actuator
+- Oracle datasource
+- Oracle JDBC driver
+- Hibernate schema behavior
+- SQL logging
+
+Hibernate schema generation is disabled:
+
+```properties
+spring.jpa.hibernate.ddl-auto=none
+```
+
+This means Hibernate does not automatically create or modify production-style database tables.
+
+Database schema changes are controlled explicitly.
+
+Database passwords and other secrets should not be committed to source control. Environment variables or a secrets-management system will be used as the project evolves.
+
+---
+
+## 22. Spring Boot Actuator
+
+Spring Boot Actuator continues to provide operational health information for the Customer Service.
+
+Example:
+
+```http
+GET /actuator/health
+```
+
+This endpoint will eventually be useful for:
+
+- Kubernetes health checks
+- AWS load balancer health checks
+- Monitoring
+- Database health
+- Kafka health
+- Redis health
+- Production operations
+
+The custom Customer Service health endpoint is separate from Actuator.
+
+---
+
+## 23. Maven Multi-Module Validation
+
+The complete backend was built from:
+
+```text
+platform-services
+```
+
+using:
+
+```bash
+mvn clean install
+```
+
+The Maven Reactor successfully built:
+
+```text
+Enterprise Financial Platform Services
+Platform Common
+Customer Service
+```
+
+Result:
+
+```text
+BUILD SUCCESS
+```
+
+This confirmed that the Customer Service and shared Platform Common module continue to work correctly after adding the persistence layer.
+
+---
+
+## 24. Problems Encountered and Resolved
+
+### Problem 1 - DataSource Configuration
+
+After Spring Data JPA was added, Spring Boot attempted to configure a database automatically.
+
+The application initially failed because no datasource URL was configured.
+
+The error indicated that the application could not determine a suitable database driver.
+
+### Resolution
+
+Oracle datasource configuration and the Oracle JDBC driver were added.
+
+---
+
+### Problem 2 - Hibernate JDBC Metadata
+
+Hibernate initially could not determine database information because a usable Oracle database connection was not available.
+
+### Resolution
+
+Oracle Free was started in Docker and a valid connection to `FREEPDB1` was configured.
+
+---
+
+### Problem 3 - Docker Command
+
+An incorrect Docker command initially caused Docker to interpret `name` as an image.
+
+### Resolution
+
+The container was started correctly using the `--name` option.
+
+The Oracle container was successfully created as:
+
+```text
+financial-oracle
+```
+
+---
+
+### Problem 4 - Oracle Privileges
+
+Creating the `CUSTOMERS` table initially failed with:
+
+```text
+ORA-01031: insufficient privileges
+```
+
+### Resolution
+
+The required table privileges and tablespace quota were configured for `financial_user`.
+
+After the permissions were corrected, the `CUSTOMERS` table was created successfully.
+
+---
+
+### Problem 5 - IntelliJ Column Warnings
+
+IntelliJ initially displayed warnings such as:
+
+```text
+Cannot resolve column 'CUSTOMER_ID'
+```
+
+This was an IDE database inspection issue rather than a Java compilation problem.
+
+### Resolution
+
+IntelliJ Database Tools were connected to the Oracle `FREEPDB1` service and the `FINANCIAL_USER` schema was refreshed.
+
+---
+
+### Problem 6 - GET Endpoint Returned 404
+
+The newly added customer endpoint initially returned HTTP 404.
+
+### Resolution
+
+The project was rebuilt and the Customer Service was restarted so the new controller mapping was loaded.
+
+---
+
+### Problem 7 - Empty Customer JSON
+
+The first successful database query returned:
+
+```json
+{
+  "data": [
+    {}
+  ]
+}
+```
+
+This proved that Oracle returned a row, but the Customer object's private fields were not being serialized into the API response.
+
+### Resolution
+
+Lombok getter and setter support was added to the Customer entity:
+
+```java
+@Getter
+@Setter
+```
+
+The application was restarted.
+
+The API then returned all Customer fields successfully.
+
+---
+
+## 25. Important Concepts Learned
+
+### Entity
+
+A Java object representing persistent business data.
+
+Example:
+
+```text
+Customer.java
+```
+
+---
+
+### Repository
+
+The persistence layer responsible for accessing stored data.
+
+Example:
+
+```text
+CustomerRepository
+```
+
+---
+
+### Service
+
+The layer responsible for coordinating application and business logic.
+
+Example:
+
+```text
+CustomerService
+```
+
+---
+
+### Controller
+
+The REST API entry point that receives HTTP requests and returns HTTP responses.
+
+Example:
+
+```text
+CustomerController
+```
+
+---
+
+### Spring Data JPA
+
+Spring's repository abstraction for JPA-based persistence.
+
+---
+
+### JPA
+
+The Java persistence specification defining how objects are mapped to relational data.
+
+---
+
+### Hibernate
+
+The ORM implementation used to execute JPA persistence operations.
+
+---
+
+### ORM
+
+Object Relational Mapping converts between Java objects and relational database records.
+
+```text
+Customer Object ↔ CUSTOMERS Row
+```
+
+---
+
+### JDBC
+
+Java Database Connectivity provides the standard Java API for communicating with relational databases.
+
+---
+
+### DataSource
+
+A configured source of database connections used by the application.
+
+---
+
+### Dependency Injection
+
+Dependencies are supplied by Spring rather than manually created inside application classes.
+
+---
+
+### Spring Bean
+
+An object created and managed by the Spring Application Context.
+
+Examples include:
+
+```text
+CustomerController
+CustomerService
+CustomerRepository
+```
+
+---
+
+### Jackson
+
+Jackson converts Java objects into JSON responses and JSON requests into Java objects.
+
+---
+
+## 26. Real-Time Interview Explanation
+
+A concise way to explain the implementation:
+
+> In the Customer Service, I follow a layered Spring Boot architecture. The controller exposes the REST APIs and delegates requests to the service layer. The service coordinates the business logic and communicates with the repository layer. For persistence, I use Spring Data JPA repositories. JPA defines the persistence standard, while Hibernate is the ORM implementation that maps our Java Customer entity to the Oracle CUSTOMERS table and generates the required SQL. Hibernate communicates with Oracle through JDBC and the Oracle driver. This separation keeps the API, business logic, and persistence responsibilities clean and makes the application easier to maintain and test.
+
+---
+
+## 27. End-to-End Day 4 Flow
+
+At the end of Day 4, the application successfully supports:
+
+```text
+Postman
+   ↓
+HTTP GET /api/v1/customers
+   ↓
+CustomerController
+   ↓
+CustomerService
+   ↓
+CustomerRepository
+   ↓
+Spring Data JPA
+   ↓
+Hibernate
+   ↓
+Oracle JDBC Driver
+   ↓
+Oracle FREEPDB1
+   ↓
+CUSTOMERS
+   ↓
+Customer Entity
+   ↓
+ApiResponse
+   ↓
+Jackson JSON Serialization
+   ↓
+HTTP 200 OK
+   ↓
+Postman
+```
+
+---
+
+## 28. Day 4 Validation Checklist
+
+- [x] Spring Data JPA added
+- [x] Oracle JDBC driver added
+- [x] Oracle Free running through Docker
+- [x] SQL Developer connected
+- [x] IntelliJ Database Tools connected
+- [x] `financial_user` configured
+- [x] `CUSTOMERS` table created
+- [x] Customer entity created
+- [x] CustomerRepository created
+- [x] CustomerService created
+- [x] CustomerController connected to service
+- [x] Shared `ApiResponse<T>` reused
+- [x] Test customer inserted into Oracle
+- [x] Hibernate successfully queried Oracle
+- [x] Customer entity successfully serialized to JSON
+- [x] `GET /api/v1/customers` returned 200 OK
+- [x] Customer health endpoint verified
+- [x] Actuator health verified
+- [x] Maven multi-module build successful
+
+---
+
+## 29. Day 4 Result
+
+Day 4 established the first real persistence foundation for the Enterprise Financial Data Platform.
+
+The project has progressed from:
+
+```text
+Day 1
+Development Environment
+
+        ↓
+
+Day 2
+Spring Boot Customer Service
+
+        ↓
+
+Day 3
+Multi-Module Architecture + Platform Common
+
+        ↓
+
+Day 4
+Customer Domain + JPA + Hibernate + Oracle Persistence
+```
+
+The Customer Service is now connected to a real Oracle database and can retrieve customer records through the REST API.
+
+Full CRUD functionality has intentionally not been implemented yet. Day 4 focused on establishing and validating the persistence foundation before expanding the Customer API.
+
+---
+
+## Status
+
+**Day 4 - Completed Successfully**
