@@ -2,8 +2,8 @@ package com.financialplatform.customer.controller;
 
 import com.financialplatform.common.constants.ApplicationConstants;
 import com.financialplatform.common.response.ApiResponse;
-import com.financialplatform.customer.entity.Customer;
 import com.financialplatform.customer.service.CustomerService;
+import com.financialplatform.customer.dto.CustomerResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,11 +23,11 @@ public class CustomerController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<Customer>>> getAllCustomers() {
+    public ResponseEntity<ApiResponse<List<CustomerResponse>>> getAllCustomers() {
 
-        List<Customer> customers = customerService.getAllCustomers();
+        List<CustomerResponse> customers = customerService.getAllCustomers();
 
-        ApiResponse<List<Customer>> response =
+        ApiResponse<List<CustomerResponse>> response =
                 new ApiResponse<>(
                         true,
                         "Customers fetched successfully",

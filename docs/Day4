@@ -6,7 +6,7 @@
 
 The goal of Day 4 was to move the Customer Service from a basic Spring Boot service into a real database-backed microservice.
 
-The Customer Service was integrated with Oracle using Spring Data JPA and Hibernate. A Customer domain entity, repository layer, service layer, and database-backed REST API were implemented and tested end-to-end.
+The Customer Service was integrated with Oracle using Spring Data JPA and Hibernate. A Customer domain entity, repository layer, service layer, DTO layer, validation foundation, mapper, and database-backed REST API were implemented and tested end-to-end.
 
 ---
 
@@ -85,8 +85,13 @@ enterprise-financial-data-platform/
 │           │   ├── CustomerServiceApplication.java
 │           │   ├── controller/
 │           │   │   └── CustomerController.java
+│           │   ├── dto/
+│           │   │   ├── CustomerRequest.java
+│           │   │   └── CustomerResponse.java
 │           │   ├── entity/
 │           │   │   └── Customer.java
+│           │   ├── mapper/
+│           │   │   └── CustomerMapper.java
 │           │   ├── repository/
 │           │   │   └── CustomerRepository.java
 │           │   └── service/
@@ -527,7 +532,7 @@ CustomerService
         ↓
 CustomerController
         ↓
-ApiResponse<List<Customer>>
+ApiResponse<List<CustomerResponse>>
         ↓
 Jackson converts Java objects to JSON
         ↓
@@ -612,6 +617,91 @@ Example response:
 ```
 
 This confirmed the complete database-to-REST flow.
+
+---
+
+
+## DTO, Validation & Mapper Foundation
+
+Day 4 was extended to introduce a proper API contract instead of exposing the JPA entity directly.
+
+### CustomerRequest
+
+Created:
+
+```text
+customer/dto/CustomerRequest.java
+```
+
+`CustomerRequest` represents incoming customer data and defines Jakarta Bean Validation rules.
+
+Current validation annotations include:
+
+- `@NotBlank` for required first and last names and email.
+- `@Size` for name length validation.
+- `@Email` for email-format validation.
+- `@Pattern` for the expected 10-digit phone-number format.
+- `@Past` for date-of-birth validation.
+
+Server-controlled fields such as `customerId`, `customerNumber`, `customerStatus`, `createdAt`, and `updatedAt` are intentionally not accepted in the request DTO.
+
+These validation rules are prepared on Day 4 and will execute when the request DTO is connected to an endpoint using `@Valid`.
+
+### CustomerResponse
+
+Created:
+
+```text
+customer/dto/CustomerResponse.java
+```
+
+`CustomerResponse` defines the public customer API response and prevents the JPA entity from becoming the external API contract.
+
+### CustomerMapper
+
+Created:
+
+```text
+customer/mapper/CustomerMapper.java
+```
+
+`CustomerMapper` converts the persistence entity into the response DTO:
+
+```text
+Customer Entity
+      ↓
+CustomerMapper.toResponse()
+      ↓
+CustomerResponse DTO
+```
+
+The mapper is currently a plain Java utility class.
+
+### Updated GET Flow
+
+The database-backed GET API was refactored to use the response DTO:
+
+```text
+Oracle CUSTOMERS
+       ↓
+Customer Entity
+       ↓
+CustomerRepository
+       ↓
+CustomerService
+       ↓
+CustomerMapper
+       ↓
+CustomerResponse DTO
+       ↓
+CustomerController
+       ↓
+ApiResponse<List<CustomerResponse>>
+       ↓
+JSON
+```
+
+This provides separation between the persistence model and REST API contract.
 
 ---
 
@@ -967,7 +1057,11 @@ CUSTOMERS
    ↓
 Customer Entity
    ↓
-ApiResponse
+CustomerMapper
+   ↓
+CustomerResponse DTO
+   ↓
+ApiResponse<List<CustomerResponse>>
    ↓
 Jackson JSON Serialization
    ↓
@@ -988,13 +1082,17 @@ Postman
 - [x] `financial_user` configured
 - [x] `CUSTOMERS` table created
 - [x] Customer entity created
+- [x] CustomerRequest DTO created with validation annotations
+- [x] CustomerResponse DTO created
+- [x] CustomerMapper created
+- [x] GET API refactored to return CustomerResponse DTOs
 - [x] CustomerRepository created
 - [x] CustomerService created
 - [x] CustomerController connected to service
 - [x] Shared `ApiResponse<T>` reused
 - [x] Test customer inserted into Oracle
 - [x] Hibernate successfully queried Oracle
-- [x] Customer entity successfully serialized to JSON
+- [x] Customer entity successfully mapped to CustomerResponse DTO
 - [x] `GET /api/v1/customers` returned 200 OK
 - [x] Customer health endpoint verified
 - [x] Actuator health verified
@@ -1025,12 +1123,12 @@ Multi-Module Architecture + Platform Common
         ↓
 
 Day 4
-Customer Domain + JPA + Hibernate + Oracle Persistence
+Customer Domain + DTOs + Validation + Mapper + JPA + Hibernate + Oracle Persistence
 ```
 
-The Customer Service is now connected to a real Oracle database and can retrieve customer records through the REST API.
+The Customer Service is now connected to a real Oracle database and can retrieve customer records through the REST API using `CustomerResponse` rather than exposing the JPA entity directly.
 
-Full CRUD functionality has intentionally not been implemented yet. Day 4 focused on establishing and validating the persistence foundation before expanding the Customer API.
+The `CustomerRequest` validation foundation and `CustomerMapper` mapping layer are also prepared. Full CRUD functionality has intentionally not been implemented yet. Day 4 focused on establishing the domain model, API contract, validation foundation, mapping layer, and Oracle persistence before expanding the Customer API.
 
 ---
 
