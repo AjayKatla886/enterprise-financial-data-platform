@@ -30,6 +30,7 @@
     <modules>
         <module>platform-common</module>
         <module>customer-service</module>
+        <module>account-service</module>
     </modules>
 
 </project>
