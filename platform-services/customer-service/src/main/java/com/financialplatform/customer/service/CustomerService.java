@@ -1,29 +1,31 @@
 package com.financialplatform.customer.service;
 
 import com.financialplatform.common.response.PageResponse;
+import com.financialplatform.customer.dto.CustomerPatchRequest;
 import com.financialplatform.customer.dto.CustomerRequest;
 import com.financialplatform.customer.dto.CustomerResponse;
 import com.financialplatform.customer.entity.Customer;
+import com.financialplatform.customer.entity.CustomerStatus;
+import com.financialplatform.customer.exception.CustomerNotFoundException;
+import com.financialplatform.customer.exception.DuplicateCustomerException;
 import com.financialplatform.customer.mapper.CustomerMapper;
 import com.financialplatform.customer.repository.CustomerRepository;
 import com.financialplatform.customer.specification.CustomerSpecification;
+import jakarta.persistence.EntityManager;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
-import com.financialplatform.customer.exception.CustomerNotFoundException;
-import com.financialplatform.customer.dto.CustomerPatchRequest;
 import org.springframework.transaction.annotation.Transactional;
-import com.financialplatform.customer.entity.CustomerStatus;
-import com.financialplatform.customer.exception.DuplicateCustomerException;
-import jakarta.persistence.EntityManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
+@Slf4j
 @Service
 @Transactional(readOnly = true)
 public class CustomerService {
@@ -42,7 +44,10 @@ public class CustomerService {
     private final CustomerRepository customerRepository;
     private final EntityManager entityManager;
 
-    public CustomerService(CustomerRepository customerRepository, EntityManager entityManager) {
+    public CustomerService(
+            CustomerRepository customerRepository,
+            EntityManager entityManager
+    ) {
         this.customerRepository = customerRepository;
         this.entityManager = entityManager;
     }
@@ -59,27 +64,48 @@ public class CustomerService {
             String sortDir
     ) {
 
+        log.debug(
+                "Fetching customers. page={}, size={}, sortBy={}, sortDir={}, hasSearch={}, status={}",
+                page,
+                size,
+                sortBy,
+                sortDir,
+                search != null && !search.isBlank(),
+                status
+        );
+
         if (!sortDir.equalsIgnoreCase("asc")
                 && !sortDir.equalsIgnoreCase("desc")) {
+
+            log.warn(
+                    "Invalid customer sort direction requested. sortDir={}",
+                    sortDir
+            );
+
             throw new IllegalArgumentException(
                     "Sort direction must be either 'asc' or 'desc'"
             );
         }
+
         Sort.Direction direction =
                 sortDir.equalsIgnoreCase("desc")
                         ? Sort.Direction.DESC
                         : Sort.Direction.ASC;
 
         if (!ALLOWED_SORT_FIELDS.contains(sortBy)) {
+
+            log.warn(
+                    "Invalid customer sort field requested. sortBy={}",
+                    sortBy
+            );
+
             throw new IllegalArgumentException(
                     "Invalid sort field: " + sortBy
             );
         }
 
-        String validatedSortBy = sortBy;
-
         Sort sort =
-                Sort.by(direction, validatedSortBy);
+                Sort.by(direction, sortBy);
 
         Pageable pageable =
                 PageRequest.of(page, size, sort);
@@ -93,6 +119,8 @@ public class CustomerService {
                         || (customerNumber != null && !customerNumber.isBlank());
 
         if (hasFilters) {
+
+            log.debug("Executing customer query using structured filters");
 
             Specification<Customer> specification =
                     Specification
@@ -109,6 +137,8 @@ public class CustomerService {
 
         } else if (search != null && !search.isBlank()) {
 
+            log.debug("Executing customer free-text search");
+
             customerPage =
                     customerRepository.searchCustomers(
                             search.trim(),
@@ -116,6 +146,8 @@ public class CustomerService {
                     );
 
         } else {
+
+            log.debug("Executing customer query without filters");
 
             customerPage =
                     customerRepository.findAll(pageable);
@@ -127,6 +159,13 @@ public class CustomerService {
                         .map(CustomerMapper::toResponse)
                         .toList();
 
+        log.debug(
+                "Customer query completed. returned={}, totalElements={}, totalPages={}",
+                customers.size(),
+                customerPage.getTotalElements(),
+                customerPage.getTotalPages()
+        );
+
         return new PageResponse<>(
                 customers,
                 customerPage.getNumber(),
@@ -137,10 +176,25 @@ public class CustomerService {
                 customerPage.isLast()
         );
     }
+
     public CustomerResponse getCustomerById(Long customerId) {
 
-        Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+        log.debug(
+                "Fetching customer. customerId={}",
+                customerId
+        );
+
+        Customer customer =
+                customerRepository.findById(customerId)
+                        .orElseThrow(() -> {
+
+                            log.warn(
+                                    "Customer not found. customerId={}",
+                                    customerId
+                            );
+
+                            return new CustomerNotFoundException(customerId);
+                        });
 
         return CustomerMapper.toResponse(customer);
     }
@@ -148,27 +202,63 @@ public class CustomerService {
     @Transactional
     public CustomerResponse createCustomer(CustomerRequest request) {
 
+        log.info("Customer creation requested");
+
         if (customerRepository.existsByEmailIgnoreCase(request.email())) {
+
+            log.warn(
+                    "Customer creation rejected because email already exists"
+            );
+
             throw new DuplicateCustomerException(
                     "Customer with this email already exists"
             );
         }
-        Customer customer = new Customer();
-        customer.setFirstName(request.firstName().trim());
-        customer.setLastName(request.lastName().trim());
-        customer.setEmail(request.email().trim().toLowerCase());
-        customer.setPhoneNumber(request.phoneNumber());
-        customer.setDateOfBirth(request.dateOfBirth());
-        customer.setCustomerStatus(CustomerStatus.ACTIVE);
 
-        LocalDateTime now = LocalDateTime.now();
+        Customer customer = new Customer();
+
+        customer.setFirstName(
+                request.firstName().trim()
+        );
+
+        customer.setLastName(
+                request.lastName().trim()
+        );
+
+        customer.setEmail(
+                request.email()
+                        .trim()
+                        .toLowerCase()
+        );
+
+        customer.setPhoneNumber(
+                request.phoneNumber()
+        );
+
+        customer.setDateOfBirth(
+                request.dateOfBirth()
+        );
+
+        customer.setCustomerStatus(
+                CustomerStatus.ACTIVE
+        );
+
+        LocalDateTime now =
+                LocalDateTime.now();
 
         customer.setCreatedAt(now);
         customer.setUpdatedAt(now);
 
-        Customer savedCustomer = customerRepository.saveAndFlush(customer);
+        Customer savedCustomer =
+                customerRepository.saveAndFlush(customer);
 
         entityManager.refresh(savedCustomer);
+
+        log.info(
+                "Customer created successfully. customerId={}, customerNumber={}",
+                savedCustomer.getCustomerId(),
+                savedCustomer.getCustomerNumber()
+        );
 
         return CustomerMapper.toResponse(savedCustomer);
     }
@@ -176,29 +266,74 @@ public class CustomerService {
     @Transactional
     public CustomerResponse updateCustomer(
             Long customerId,
-            CustomerRequest request) {
+            CustomerRequest request
+    ) {
 
-        Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+        log.info(
+                "Customer update requested. customerId={}",
+                customerId
+        );
 
-        // Prevent changing the customer's email to an email
-        // already owned by another customer.
-        if (!customer.getEmail().equalsIgnoreCase(request.email())
-                && customerRepository.existsByEmailIgnoreCase(request.email())) {
+        Customer customer =
+                customerRepository.findById(customerId)
+                        .orElseThrow(() -> {
+
+                            log.warn(
+                                    "Customer update failed because customer was not found. customerId={}",
+                                    customerId
+                            );
+
+                            return new CustomerNotFoundException(customerId);
+                        });
+
+        if (!customer.getEmail()
+                .equalsIgnoreCase(request.email())
+                && customerRepository
+                .existsByEmailIgnoreCase(request.email())) {
+
+            log.warn(
+                    "Customer update rejected because requested email is already in use. customerId={}",
+                    customerId
+            );
+
             throw new DuplicateCustomerException(
                     "Customer with this email already exists"
             );
         }
 
-        customer.setFirstName(request.firstName().trim());
-        customer.setLastName(request.lastName().trim());
-        customer.setEmail(request.email().trim().toLowerCase());
-        customer.setPhoneNumber(request.phoneNumber());
-        customer.setDateOfBirth(request.dateOfBirth());
-        customer.setUpdatedAt(LocalDateTime.now());
+        customer.setFirstName(
+                request.firstName().trim()
+        );
+
+        customer.setLastName(
+                request.lastName().trim()
+        );
+
+        customer.setEmail(
+                request.email()
+                        .trim()
+                        .toLowerCase()
+        );
+
+        customer.setPhoneNumber(
+                request.phoneNumber()
+        );
+
+        customer.setDateOfBirth(
+                request.dateOfBirth()
+        );
+
+        customer.setUpdatedAt(
+                LocalDateTime.now()
+        );
 
         Customer updatedCustomer =
                 customerRepository.save(customer);
+
+        log.info(
+                "Customer updated successfully. customerId={}",
+                customerId
+        );
 
         return CustomerMapper.toResponse(updatedCustomer);
     }
@@ -206,26 +341,56 @@ public class CustomerService {
     @Transactional
     public CustomerResponse patchCustomer(
             Long customerId,
-            CustomerPatchRequest request) {
+            CustomerPatchRequest request
+    ) {
 
-        Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+        log.info(
+                "Customer partial update requested. customerId={}",
+                customerId
+        );
+
+        Customer customer =
+                customerRepository.findById(customerId)
+                        .orElseThrow(() -> {
+
+                            log.warn(
+                                    "Customer patch failed because customer was not found. customerId={}",
+                                    customerId
+                            );
+
+                            return new CustomerNotFoundException(customerId);
+                        });
 
         if (request.firstName() != null) {
-            customer.setFirstName(request.firstName().trim());
+
+            customer.setFirstName(
+                    request.firstName().trim()
+            );
         }
 
         if (request.lastName() != null) {
-            customer.setLastName(request.lastName().trim());
+
+            customer.setLastName(
+                    request.lastName().trim()
+            );
         }
 
         if (request.email() != null) {
 
             String normalizedEmail =
-                    request.email().trim().toLowerCase();
+                    request.email()
+                            .trim()
+                            .toLowerCase();
 
-            if (!customer.getEmail().equalsIgnoreCase(normalizedEmail)
-                    && customerRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+            if (!customer.getEmail()
+                    .equalsIgnoreCase(normalizedEmail)
+                    && customerRepository
+                    .existsByEmailIgnoreCase(normalizedEmail)) {
+
+                log.warn(
+                        "Customer patch rejected because requested email is already in use. customerId={}",
+                        customerId
+                );
 
                 throw new DuplicateCustomerException(
                         "Customer with this email already exists"
@@ -236,39 +401,85 @@ public class CustomerService {
         }
 
         if (request.phoneNumber() != null) {
-            customer.setPhoneNumber(request.phoneNumber());
+
+            customer.setPhoneNumber(
+                    request.phoneNumber()
+            );
         }
 
         if (request.dateOfBirth() != null) {
-            customer.setDateOfBirth(request.dateOfBirth());
+
+            customer.setDateOfBirth(
+                    request.dateOfBirth()
+            );
         }
 
-        customer.setUpdatedAt(LocalDateTime.now());
+        customer.setUpdatedAt(
+                LocalDateTime.now()
+        );
 
         Customer updatedCustomer =
                 customerRepository.save(customer);
 
+        log.info(
+                "Customer partially updated successfully. customerId={}",
+                customerId
+        );
+
         return CustomerMapper.toResponse(updatedCustomer);
     }
+
     @Transactional
-    public CustomerResponse deactivateCustomer(Long customerId) {
+    public CustomerResponse deactivateCustomer(
+            Long customerId
+    ) {
 
-        Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+        log.info(
+                "Customer deactivation requested. customerId={}",
+                customerId
+        );
 
-        if (customer.getCustomerStatus() == CustomerStatus.INACTIVE) {
-            throw new DuplicateCustomerException(
+        Customer customer =
+                customerRepository.findById(customerId)
+                        .orElseThrow(() -> {
+
+                            log.warn(
+                                    "Customer deactivation failed because customer was not found. customerId={}",
+                                    customerId
+                            );
+
+                            return new CustomerNotFoundException(customerId);
+                        });
+
+        if (customer.getCustomerStatus()
+                == CustomerStatus.INACTIVE) {
+
+            log.warn(
+                    "Customer deactivation rejected because customer is already inactive. customerId={}",
+                    customerId
+            );
+
+            throw new IllegalArgumentException(
                     "Customer is already inactive"
             );
         }
 
-        customer.setCustomerStatus(CustomerStatus.INACTIVE);
-        customer.setUpdatedAt(LocalDateTime.now());
+        customer.setCustomerStatus(
+                CustomerStatus.INACTIVE
+        );
+
+        customer.setUpdatedAt(
+                LocalDateTime.now()
+        );
 
         Customer updatedCustomer =
                 customerRepository.save(customer);
 
+        log.info(
+                "Customer deactivated successfully. customerId={}",
+                customerId
+        );
+
         return CustomerMapper.toResponse(updatedCustomer);
     }
-
 }
