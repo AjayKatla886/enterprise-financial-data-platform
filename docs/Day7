@@ -1,0 +1,298 @@
+ENTERPRISE FINANCIAL DATA PLATFORM
+
+Day 7
+Service Communication,
+Testing & Hardening
+
+Customer Service ↔ Account Service
+
+Java 21 • Spring Boot • REST • Oracle • Flyway • JUnit 5 • Mockito
+
+Project
+
+Enterprise Financial Data Platform
+
+Day
+
+7
+
+Focus
+
+Microservice communication, failure handling, automated tests
+
+Outcome
+
+Stable Customer + Account backend baseline
+
+
+Enterprise Financial Data Platform • Day 7
+
+1. Day 7 Objective
+
+Day 7 focused on making the existing Customer and Account microservices behave more like production services. The main goals were to validate a customer before account creation, handle downstream failures safely, add explicit HTTP timeouts, and build a reliable unit-test baseline.
+
+2. Architecture Added
+
+Client / Postman
+      |
+      v
+Account Service :8081
+      |
+      | REST GET /api/v1/customers/{customerId}
+      v
+Customer Service :8080
+      |
+      v
+Oracle
+
+Account Service does not directly join or map the Customer entity. It stores only customerId and uses the Customer Service API to validate the customer. This preserves the microservice boundary.
+
+3. Account → Customer REST Communication
+
+Configuration
+
+services.customer.base-url=${CUSTOMER_SERVICE_URL:http://localhost:8080}
+
+The base URL is externalized so local development can use localhost while later environments can provide a different service address without changing source code.
+
+CustomerClient responsibilities
+
+Call Customer Service using Spring RestClient.
+
+Return the minimal customer information required by Account Service.
+
+Treat HTTP 404 as an invalid/nonexistent customer.
+
+Convert downstream 5xx and connection failures into CustomerServiceUnavailableException.
+
+Avoid importing Customer Service DTO classes into Account Service.
+
+4. Account Creation Validation
+
+Before creating an account, Account Service now verifies:
+
+The customer exists.
+
+The customer is ACTIVE.
+
+The customer does not already have the requested account type.
+
+The downstream Customer Service is available.
+
+Only after these checks succeed does Account Service save the account and allow Oracle to generate the business account number.
+
+
+Enterprise Financial Data Platform • Day 7
+
+5. Downstream Failure Handling
+
+Network failures should not leak low-level exceptions to API consumers. Account Service catches connection-level ResourceAccessException failures and converts them into a controlled dependency error.
+
+Customer Service unavailable
+        ↓
+ResourceAccessException / downstream 5xx
+        ↓
+CustomerServiceUnavailableException
+        ↓
+GlobalExceptionHandler
+        ↓
+HTTP 503 Service Unavailable
+
+Verified API response:
+
+{
+  "success": false,
+  "message": "Customer Service is currently unavailable",
+  "data": null
+}
+
+6. HTTP Timeout Hardening
+
+Explicit timeouts were added to prevent Account Service from waiting indefinitely when Customer Service is unreachable or slow.
+
+HttpClient httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(3))
+        .build();
+
+JdkClientHttpRequestFactory requestFactory =
+        new JdkClientHttpRequestFactory(httpClient);
+
+requestFactory.setReadTimeout(Duration.ofSeconds(5));
+
+Timeout
+
+Value
+
+Purpose
+
+Connect
+
+3 seconds
+
+Limits time spent establishing the HTTP connection.
+
+Read
+
+5 seconds
+
+Limits time waiting for the downstream response.
+
+7. Customer Address History Hardening
+
+The Customer Address feature was stabilized as part of the same backend hardening pass. A customer can have address history while maintaining only one current address for each address type.
+
+Only ACTIVE customers can add an address.
+
+An identical current address is rejected.
+
+Replacing a current address expires the previous record and inserts the new record in one transaction.
+
+Address ownership is validated when retrieving an address by ID.
+
+Current-address uniqueness is also protected at the database level.
+
+
+Enterprise Financial Data Platform • Day 7
+
+8. Automated Unit Testing
+
+JUnit 5 and Mockito were used for fast service-layer unit tests. Oracle and Flyway are not started for these tests; repositories, EntityManager, and service clients are mocked. Real database/container integration testing is intentionally deferred to a later testing phase.
+
+AccountServiceTest
+
+Create account for an active customer.
+
+Reject inactive and nonexistent customers.
+
+Reject Customer Service unavailability.
+
+Reject duplicate account type.
+
+Validate account status/close lifecycle.
+
+Retrieve account and handle account-not-found.
+
+Result: 10 Account Service unit tests passed.
+
+CustomerServiceTest
+
+Create, retrieve, update, and patch customer.
+
+Reject duplicate email conditions.
+
+Deactivate active customer.
+
+Reject repeated deactivation.
+
+Handle customer-not-found.
+
+Result: 10 core Customer Service unit tests passed.
+
+CustomerAddressServiceTest
+
+Add address for active customer.
+
+Reject inactive customer and duplicate current address.
+
+Move previous current address to history.
+
+Retrieve history and current addresses.
+
+Validate address ownership and not-found scenarios.
+
+Reject lookup when the customer does not exist.
+
+Result: 10 Customer Address Service unit tests passed.
+
+Important test-model detail
+
+CustomerAddressResponse exposes addressType as a String. Unit-test assertions therefore compare against "HOME" or AddressType.HOME.name(), rather than comparing the enum object directly.
+
+
+Enterprise Financial Data Platform • Day 7
+
+9. Build & Regression Verification
+
+The following Maven checks were completed successfully:
+
+mvn -pl account-service -am test
+mvn -pl customer-service -am test
+mvn clean test
+
+The final multi-module reactor build verified platform-common, customer-service, and account-service together. The backend baseline completed with BUILD SUCCESS.
+
+10. Manual Runtime Verification
+
+Scenario
+
+Expected behavior
+
+Result
+
+Active customer
+
+Account can be created when rules pass.
+
+Passed
+
+Inactive customer
+
+Account creation rejected.
+
+Passed
+
+Missing customer
+
+Account creation rejected; no invalid account.
+
+Passed
+
+Customer Service stopped
+
+Controlled HTTP 503 response.
+
+Passed
+
+11. Production Design Decisions
+
+Microservices communicate through APIs instead of cross-service JPA relationships.
+
+Account Service owns Account domain logic; Customer Service owns Customer and Customer Address logic.
+
+Environment-specific service URLs remain externalized.
+
+Business exceptions are translated centrally through @RestControllerAdvice.
+
+Timeouts are configured now; retry/circuit breaker behavior will be introduced later with Resilience4j.
+
+Service-to-service authentication will be added during the security phase.
+
+12. Deferred Improvements
+
+The following are deliberately deferred so the project grows in controlled stages: Resilience4j retry and circuit breaker, JWT/OAuth2 service security, API Gateway, Kafka, Redis, Testcontainers/Oracle integration tests, distributed tracing, monitoring, Docker/Kubernetes, AWS deployment, Terraform and CI/CD.
+
+13. Day 7 Completion Checklist
+
+Account → Customer REST validation implemented.
+
+Customer inactive/not-found rules verified.
+
+Downstream service failure mapped to HTTP 503.
+
+3-second connect and 5-second read timeouts added.
+
+Account Service unit tests completed.
+
+Customer Service core unit tests completed.
+
+Customer Address Service unit tests completed.
+
+Full customer-service Maven test run passed.
+
+Full multi-module Maven clean test passed.
+
+14. Interview Talking Points
+
+A concise way to explain this work in an interview: Account Service does not access Customer tables directly. During account creation it validates the customer through a REST API, checks business status and duplicate-account rules, and converts downstream network failures into a controlled 503 response. Explicit connect/read timeouts prevent hanging calls. JUnit and Mockito cover success, validation, lifecycle and dependency-failure paths, and the complete Maven reactor is run to prevent cross-module regressions.
+
+Enterprise Financial Data Platform • Day 7

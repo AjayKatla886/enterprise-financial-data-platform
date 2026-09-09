@@ -1,0 +1,481 @@
+Enterprise Financial Data Platform  |  Day 6 Engineering Notes
+
+DAY 6
+
+Account Service Foundation
+
+Enterprise Financial Data Platform
+
+Java 21 • Spring Boot 4.1.1 • Spring Data JPA • Oracle • Flyway • Maven
+
+1. Day 6 Objective
+
+Build the second independently runnable microservice for the platform and establish the Account domain, Oracle persistence, versioned schema migrations, API validation, filtering, lifecycle rules, and database-level integrity.
+
+2. Architecture Added
+
+Customer Service :8080
+
+        |
+
+        | customerId (logical ownership reference)
+
+        v
+
+Account Service :8081
+
+        |
+
+        +-- Controller
+
+        +-- DTO / Validation
+
+        +-- Service / Business Rules
+
+        +-- Mapper
+
+        +-- Repository / Specifications
+
+        +-- JPA / Hibernate
+
+        v
+
+Oracle - ACCOUNTS
+
+Customer and Account remain separate service domains. Account Service stores customerId as a logical reference; it does not import the Customer entity or create a JPA relationship across services.
+
+3. Multi-Module Maven Setup
+
+platform-services/
+
+├── pom.xml
+
+├── platform-common/
+
+├── customer-service/
+
+└── account-service/
+
+Added account-service to the platform-services Maven modules.
+
+Account Service inherits from the platform-services parent POM.
+
+Account Service depends on platform-common for shared response models.
+
+Full reactor build verified successfully across Platform Common, Customer Service, and Account Service.
+
+4. Account Service Runtime Configuration
+
+Setting
+
+Value / Decision
+
+Application
+
+account-service
+
+Port
+
+8081
+
+Database
+
+Oracle FREEPDB1 - local Docker environment
+
+Credentials
+
+Environment-variable placeholders; no password committed
+
+JPA DDL
+
+none - Hibernate does not own schema creation
+
+Open Session in View
+
+Disabled
+
+Actuator
+
+health, info
+
+spring.datasource.url=${DB_URL}
+
+spring.datasource.username=${DB_USERNAME}
+
+spring.datasource.password=${DB_PASSWORD}
+
+spring.jpa.hibernate.ddl-auto=none
+
+spring.jpa.open-in-view=false
+
+Local IntelliJ run configuration supplies DB_URL, DB_USERNAME, and DB_PASSWORD without storing the password as a project file.
+
+5. Account Domain Model
+
+Column
+
+Purpose
+
+Key rule
+
+ACCOUNT_ID
+
+Internal technical primary key
+
+Oracle identity
+
+ACCOUNT_NUMBER
+
+Business-facing account identifier
+
+Unique, Oracle generated, 10 digits
+
+CUSTOMER_ID
+
+Logical owner reference
+
+Required
+
+ACCOUNT_TYPE
+
+Account classification
+
+CHECKING / SAVINGS / CREDIT
+
+BALANCE
+
+Current monetary balance
+
+NUMBER(19,2), starts at 0.00
+
+ACCOUNT_STATUS
+
+Lifecycle state
+
+ACTIVE / INACTIVE / BLOCKED / CLOSED
+
+CREATED_AT
+
+Creation audit timestamp
+
+Required
+
+UPDATED_AT
+
+Last update timestamp
+
+Required
+
+6. Customer vs. Account Identifiers
+
+Identifier
+
+Role
+
+CUSTOMER_ID
+
+Internal customer technical key
+
+CUSTOMER_NUMBER
+
+Business-facing customer identifier, e.g. 000001
+
+ACCOUNT_ID
+
+Internal account technical key
+
+ACCOUNT_NUMBER
+
+Business-facing account identifier, e.g. 0000000001
+
+ACCOUNTS stores CUSTOMER_ID only. CUSTOMER_NUMBER is not duplicated into the Account table. Customer business data remains owned by Customer Service.
+
+7. Account API DTOs and Validation
+
+AccountRequest accepts only fields the caller is allowed to control:
+
+customerId   -> @NotNull + @Positive
+
+accountType  -> @NotNull
+
+The client does not supply accountNumber, balance, accountStatus, createdAt, or updatedAt. Those values are system controlled.
+
+AccountResponse returns:
+
+accountId, accountNumber, customerId, accountType,
+
+balance, accountStatus, createdAt, updatedAt
+
+8. Oracle-Generated Account Number
+
+ACCOUNT_NUMBER is generated in Oracle rather than Java. A sequence and trigger produce a fixed-width 10-digit business identifier.
+
+ACCOUNT_NUMBER_SEQ
+
+TRG_ACCOUNTS_NUMBER
+
+
+Example:
+
+0000000001
+
+0000000002
+
+After saveAndFlush(), EntityManager.refresh() reloads the trigger-generated account number into the JPA entity before the API response is returned.
+
+9. Flyway Migration Strategy
+
+Migration
+
+Purpose
+
+V1__create_account_schema.sql
+
+Create ACCOUNTS, indexes, sequence, trigger and check constraints
+
+V2__add_unique_customer_account_type.sql
+
+Prevent duplicate account type for the same customer
+
+Because Customer Service and Account Service currently share FINANCIAL_USER locally, Account Service uses its own Flyway history table.
+
+spring.flyway.table=account_flyway_schema_history
+
+spring.flyway.baseline-on-migrate=true
+
+spring.flyway.baseline-version=0
+
+The baseline at version 0 allows Account Service V1 to run even though the shared local Oracle schema already contains Customer Service objects. Flyway history was verified with baseline 0 and successful migration 1.
+
+Future AWS deployment can package approved SQL through CI/CD and S3. S3 is storage, not a migration executor; a deployment job must still execute the scripts.
+
+10. APIs Implemented
+
+Method
+
+Endpoint
+
+Purpose
+
+POST
+
+/api/v1/accounts
+
+Create account
+
+GET
+
+/api/v1/accounts/{accountId}
+
+Get account by ID
+
+GET
+
+/api/v1/accounts/customer/{customerId}
+
+Get accounts for a customer
+
+GET
+
+/api/v1/accounts
+
+Paginated/filterable account query
+
+PATCH
+
+/api/v1/accounts/{accountId}/status
+
+Change account status
+
+PATCH
+
+/api/v1/accounts/{accountId}/close
+
+Close an account
+
+11. Pagination, Filtering and Sorting
+
+Supported filters:
+
+customerId
+
+accountType
+
+status
+
+Pagination rules:
+
+page >= 0
+
+1 <= size <= 100
+
+default page = 0
+
+default size = 20
+
+Sort fields are restricted by an allowlist to known Account entity properties.
+
+accountId, accountNumber, customerId, accountType,
+
+balance, accountStatus, createdAt, updatedAt
+
+12. Account Lifecycle Rules
+
+ACTIVE <-> BLOCKED / INACTIVE
+
+
+ACTIVE / BLOCKED / INACTIVE
+
+            |
+
+            v
+
+          CLOSED
+
+            |
+
+            v
+
+          FINAL
+
+A CLOSED account cannot be changed back through the normal status API.
+
+Closing an already CLOSED account returns a business validation error.
+
+Hard delete was not introduced; lifecycle state preserves the account record.
+
+13. Duplicate Account Protection
+
+Current project rule:
+
+One CHECKING account per customer
+
+One SAVINGS account per customer
+
+One CREDIT account per customer
+
+The rule is enforced twice: a service-level existence check gives a friendly response, and Oracle enforces UNIQUE (CUSTOMER_ID, ACCOUNT_TYPE) as the final concurrency-safe integrity layer.
+
+14. Exception Handling
+
+Condition
+
+HTTP result
+
+Account not found
+
+404 Not Found
+
+Invalid request body
+
+400 Bad Request
+
+Invalid pagination / parameters
+
+400 Bad Request
+
+Invalid account lifecycle operation
+
+400 Bad Request
+
+Database integrity violation
+
+409 Conflict
+
+15. Important Microservice Relationship Decision
+
+No Oracle foreign key from ACCOUNTS.CUSTOMER_ID to CUSTOMERS.CUSTOMER_ID was added. Although both tables currently live in one local Oracle schema, the services are intended to remain independently deployable. The next feature will validate customer existence and ACTIVE status through Customer Service before Account Service creates an account.
+
+POST /api/v1/accounts
+
+        |
+
+        v
+
+Account Service
+
+        |
+
+        | validate customerId
+
+        v
+
+Customer Service :8080
+
+        |
+
+        +-- exists?
+
+        +-- ACTIVE?
+
+        |
+
+        v
+
+Create Account
+
+16. Verification Completed
+
+Account Service starts independently on port 8081.
+
+Actuator health endpoint returns UP.
+
+Flyway Account history table contains baseline 0 and migration V1.
+
+ACCOUNTS table, ACCOUNT_NUMBER_SEQ and account-number trigger were created.
+
+POST account creation works end-to-end.
+
+Oracle-generated account number is returned by the API.
+
+GET by account ID works.
+
+GET accounts by customer ID works.
+
+Pagination, filtering and sorting work.
+
+Status update and close-account rules work.
+
+Duplicate account protection works at service and database layers.
+
+Full Maven multi-module reactor build returns BUILD SUCCESS.
+
+17. Git Workflow
+
+feature/account-service-foundation
+
+        |
+
+        v
+
+Pull Request
+
+        |
+
+        v
+
+develop
+
+Account Service foundation was committed, pushed, reviewed through the PR workflow, and merged into develop.
+
+18. Engineering Lessons
+
+Separate technical IDs from business-facing numbers.
+
+Do not create JPA relationships across microservice domain boundaries.
+
+Application validation improves user feedback; database constraints provide final integrity.
+
+Schema migrations must have isolated history when multiple services share a local schema.
+
+A CLOSED financial account should be treated as a terminal lifecycle state unless a dedicated controlled process says otherwise.
+
+Balance should not become a generic client-editable field; future Transaction Service will own controlled money movement.
+
+Local shared Oracle is a development convenience, not the final production data-isolation model.
+
+19. Next Development Step
+
+Implement Account Service -> Customer Service validation so an account can only be created for a real, ACTIVE customer. After that, the project can continue toward richer account operations and the Transaction Service.
+
+Account Service Foundation
