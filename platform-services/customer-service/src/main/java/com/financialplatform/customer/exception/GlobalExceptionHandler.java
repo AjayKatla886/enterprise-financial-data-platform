@@ -1,66 +1,92 @@
 package com.financialplatform.customer.exception;
 
-import com.financialplatform.common.response.ApiResponse;
+import com.financialplatform.common.exception.ErrorCode;
+import com.financialplatform.common.exception.ErrorResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
-import org.springframework.http.converter.HttpMessageNotReadableException;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(CustomerNotFoundException.class)
-    public ResponseEntity<ApiResponse<Void>> handleCustomerNotFound(
-            CustomerNotFoundException ex) {
+    public ResponseEntity<ErrorResponse> handleCustomerNotFound(
+            CustomerNotFoundException ex,
+            HttpServletRequest request) {
+
+        log.warn("Customer not found exception. message={}", ex.getMessage());
+
+        return buildErrorResponse(
+                HttpStatus.NOT_FOUND,
+                ErrorCode.CUSTOMER_NOT_FOUND,
+                ex.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(AddressNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleAddressNotFound(
+            AddressNotFoundException ex,
+            HttpServletRequest request) {
+
+        log.warn("Customer address not found. message={}", ex.getMessage());
+
+        return buildErrorResponse(
+                HttpStatus.NOT_FOUND,
+                ErrorCode.ADDRESS_NOT_FOUND,
+                ex.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(DuplicateCustomerException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateCustomer(
+            DuplicateCustomerException ex,
+            HttpServletRequest request) {
 
         log.warn(
-                "Customer not found exception. message={}",
+                "Duplicate customer operation rejected. message={}",
                 ex.getMessage()
         );
 
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        ex.getMessage(),
-                        null
-                );
-
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(response);
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
+                ErrorCode.DUPLICATE_CUSTOMER,
+                ex.getMessage(),
+                request
+        );
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(
-            IllegalArgumentException ex) {
+    public ResponseEntity<ErrorResponse> handleIllegalArgument(
+            IllegalArgumentException ex,
+            HttpServletRequest request) {
 
-        log.warn(
-                "Invalid request. message={}",
-                ex.getMessage()
+        log.warn("Invalid request. message={}", ex.getMessage());
+
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.INVALID_REQUEST,
+                ex.getMessage(),
+                request
         );
-
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        ex.getMessage(),
-                        null
-                );
-
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(response);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiResponse<Void>> handleValidationErrors(
-            MethodArgumentNotValidException ex) {
+    public ResponseEntity<ErrorResponse> handleValidationErrors(
+            MethodArgumentNotValidException ex,
+            HttpServletRequest request) {
 
         String message = ex.getBindingResult()
                 .getFieldErrors()
@@ -73,151 +99,110 @@ public class GlobalExceptionHandler {
 
         log.warn(
                 "Request body validation failed. validationErrorCount={}",
-                ex.getBindingResult()
-                        .getFieldErrorCount()
+                ex.getBindingResult().getFieldErrorCount()
         );
 
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        message,
-                        null
-                );
-
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(response);
-    }
-
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(
-            DataIntegrityViolationException ex) {
-
-        log.warn(
-                "Database integrity violation occurred. exceptionType={}",
-                ex.getClass().getSimpleName()
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.VALIDATION_ERROR,
+                message,
+                request
         );
-
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        "Duplicate or invalid database data",
-                        null
-                );
-
-        return ResponseEntity
-                .status(HttpStatus.CONFLICT)
-                .body(response);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleConstraintViolation(
-            ConstraintViolationException ex) {
+    public ResponseEntity<ErrorResponse> handleConstraintViolation(
+            ConstraintViolationException ex,
+            HttpServletRequest request) {
 
         String message = ex.getConstraintViolations()
                 .stream()
-                .map(violation ->
-                        violation.getMessage())
+                .map(violation -> violation.getMessage())
                 .findFirst()
-                .orElse(
-                        "Invalid request parameter"
-                );
+                .orElse("Invalid request parameter");
 
         log.warn(
                 "Request parameter validation failed. violationCount={}",
                 ex.getConstraintViolations().size()
         );
 
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        message,
-                        null
-                );
-
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(response);
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.VALIDATION_ERROR,
+                message,
+                request
+        );
     }
 
-    @ExceptionHandler(DuplicateCustomerException.class)
-    public ResponseEntity<ApiResponse<Void>> handleDuplicateCustomer(
-            DuplicateCustomerException ex) {
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(
+            HttpMessageNotReadableException ex,
+            HttpServletRequest request) {
 
         log.warn(
-                "Duplicate customer operation rejected. message={}",
-                ex.getMessage()
+                "Invalid request body. Unable to deserialize request payload."
         );
 
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        ex.getMessage(),
-                        null
-                );
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.INVALID_REQUEST,
+                "Invalid request body or unsupported field value",
+                request
+        );
+    }
 
-        return ResponseEntity
-                .status(HttpStatus.CONFLICT)
-                .body(response);
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(
+            DataIntegrityViolationException ex,
+            HttpServletRequest request) {
+
+        log.warn(
+                "Database integrity violation occurred. exceptionType={}",
+                ex.getClass().getSimpleName()
+        );
+
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
+                ErrorCode.INVALID_REQUEST,
+                "Duplicate or invalid database data",
+                request
+        );
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleUnexpectedException(
-            Exception ex) {
+    public ResponseEntity<ErrorResponse> handleUnexpectedException(
+            Exception ex,
+            HttpServletRequest request) {
 
         log.error(
                 "Unexpected error occurred while processing customer request",
                 ex
         );
 
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        "An unexpected error occurred",
-                        null
-                );
-
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(response);
+        return buildErrorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                ErrorCode.INTERNAL_SERVER_ERROR,
+                "An unexpected error occurred",
+                request
+        );
     }
-    @ExceptionHandler(AddressNotFoundException.class)
-    public ResponseEntity<ApiResponse<Void>> handleAddressNotFound(
-            AddressNotFoundException ex) {
 
-        log.warn(
-                "Customer address not found. message={}",
-                ex.getMessage()
+    private ResponseEntity<ErrorResponse> buildErrorResponse(
+            HttpStatus status,
+            ErrorCode errorCode,
+            String message,
+            HttpServletRequest request) {
+
+        ErrorResponse response = new ErrorResponse(
+                false,
+                errorCode.getCode(),
+                message,
+                LocalDateTime.now(),
+                request.getRequestURI()
         );
 
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        ex.getMessage(),
-                        null
-                );
-
         return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(response);
-    }
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<ApiResponse<Void>> handleHttpMessageNotReadable(
-            HttpMessageNotReadableException ex) {
-
-        log.warn(
-                "Invalid request body. Unable to deserialize request payload."
-        );
-
-        ApiResponse<Void> response =
-                new ApiResponse<>(
-                        false,
-                        "Invalid request body or unsupported field value",
-                        null
-                );
-
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
+                .status(status)
                 .body(response);
     }
 }
