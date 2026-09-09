@@ -11,6 +11,7 @@ import com.financialplatform.account.repository.AccountRepository;
 import com.financialplatform.account.repository.AccountSpecifications;
 import com.financialplatform.common.response.PageResponse;
 import jakarta.persistence.EntityManager;
+import com.financialplatform.account.client.CustomerClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -33,6 +34,7 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final EntityManager entityManager;
+    private final CustomerClient customerClient;
 
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
             "accountId",
@@ -54,6 +56,20 @@ public class AccountService {
                 request.accountType()
         );
 
+        CustomerClient.CustomerLookupResponse customer =
+                customerClient.getCustomerById(request.customerId());
+
+        if (!"ACTIVE".equalsIgnoreCase(customer.customerStatus())) {
+
+            log.warn(
+                    "Account creation rejected because customer is not active. customerId={}, customerStatus={}",
+                    request.customerId(),
+                    customer.customerStatus()
+            );
+            throw new IllegalArgumentException(
+                    "Account cannot be created for an inactive customer"
+            );
+        }
         if (accountRepository.existsByCustomerIdAndAccountType(
                 request.customerId(),
                 request.accountType())) {

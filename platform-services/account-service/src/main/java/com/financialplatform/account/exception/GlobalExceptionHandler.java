@@ -9,7 +9,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-
+import com.financialplatform.account.exception.CustomerServiceUnavailableException;
+import org.springframework.http.HttpStatus;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -157,6 +158,26 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(response);
+    }
+    @ExceptionHandler(CustomerServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCustomerServiceUnavailable(
+            CustomerServiceUnavailableException ex) {
+
+        log.error(
+                "Customer Service dependency is unavailable. message={}",
+                ex.getMessage()
+        );
+
+        ApiResponse<Void> response =
+                new ApiResponse<>(
+                        false,
+                        ex.getMessage(),
+                        null
+                );
+
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(response);
     }
 }
