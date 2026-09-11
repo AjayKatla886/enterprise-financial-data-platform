@@ -4,6 +4,8 @@ import com.financialplatform.common.response.ApiResponse;
 import com.financialplatform.customer.dto.CustomerAddressRequest;
 import com.financialplatform.customer.dto.CustomerAddressResponse;
 import com.financialplatform.customer.service.CustomerAddressService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
@@ -18,10 +20,18 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/customers/{customerId}/addresses")
 @RequiredArgsConstructor
+@Tag(
+        name = "Customer Address Management",
+        description = "APIs for customer address creation, current-address retrieval, and address history"
+)
 public class CustomerAddressController {
 
     private final CustomerAddressService customerAddressService;
 
+    @Operation(
+            summary = "Add customer address",
+            description = "Adds a new address for an active customer and maintains address history when an existing current address is replaced"
+    )
     @PostMapping
     public ResponseEntity<ApiResponse<CustomerAddressResponse>> addAddress(
             @PathVariable
@@ -47,6 +57,10 @@ public class CustomerAddressController {
                 .body(response);
     }
 
+    @Operation(
+            summary = "Get customer address history",
+            description = "Retrieves all current and historical addresses for a customer ordered by address validity history"
+    )
     @GetMapping
     public ResponseEntity<ApiResponse<List<CustomerAddressResponse>>>
     getAddressHistory(
@@ -67,6 +81,10 @@ public class CustomerAddressController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(
+            summary = "Get current customer addresses",
+            description = "Retrieves only the addresses currently active for a customer"
+    )
     @GetMapping("/current")
     public ResponseEntity<ApiResponse<List<CustomerAddressResponse>>>
     getCurrentAddresses(
@@ -87,6 +105,10 @@ public class CustomerAddressController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(
+            summary = "Get customer address by ID",
+            description = "Retrieves a specific address and verifies that it belongs to the requested customer"
+    )
     @GetMapping("/{addressId}")
     public ResponseEntity<ApiResponse<CustomerAddressResponse>>
     getAddressById(

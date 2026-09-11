@@ -3,32 +3,29 @@ package com.financialplatform.customer.controller;
 import com.financialplatform.common.constants.ApplicationConstants;
 import com.financialplatform.common.response.ApiResponse;
 import com.financialplatform.common.response.PageResponse;
+import com.financialplatform.customer.dto.CustomerPatchRequest;
+import com.financialplatform.customer.dto.CustomerRequest;
 import com.financialplatform.customer.dto.CustomerResponse;
 import com.financialplatform.customer.service.CustomerService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import com.financialplatform.customer.dto.CustomerRequest;
-import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PutMapping;
-import com.financialplatform.customer.dto.CustomerPatchRequest;
-import org.springframework.web.bind.annotation.PatchMapping;
-
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/customers")
 @Validated
+@Tag(
+        name = "Customer Management",
+        description = "APIs for customer profile management and customer lifecycle operations"
+)
 public class CustomerController {
 
     private final CustomerService customerService;
@@ -37,6 +34,10 @@ public class CustomerController {
         this.customerService = customerService;
     }
 
+    @Operation(
+            summary = "Get customers",
+            description = "Retrieve customers using optional search, filtering, pagination, and sorting"
+    )
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CustomerResponse>>> getAllCustomers(
 
@@ -84,6 +85,10 @@ public class CustomerController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(
+            summary = "Customer Service health check",
+            description = "Returns basic Customer Service health information"
+    )
     @GetMapping("/health")
     public ResponseEntity<ApiResponse<Map<String, String>>> health() {
 
@@ -101,6 +106,11 @@ public class CustomerController {
 
         return ResponseEntity.ok(response);
     }
+
+    @Operation(
+            summary = "Create customer",
+            description = "Creates a new customer after validating customer details"
+    )
     @PostMapping
     public ResponseEntity<ApiResponse<CustomerResponse>> createCustomer(
             @Valid @RequestBody CustomerRequest request) {
@@ -119,6 +129,11 @@ public class CustomerController {
                 .status(HttpStatus.CREATED)
                 .body(response);
     }
+
+    @Operation(
+            summary = "Get customer by ID",
+            description = "Retrieves a customer using the internal customer identifier"
+    )
     @GetMapping("/{customerId}")
     public ResponseEntity<ApiResponse<CustomerResponse>> getCustomerById(
             @PathVariable Long customerId) {
@@ -135,6 +150,11 @@ public class CustomerController {
 
         return ResponseEntity.ok(response);
     }
+
+    @Operation(
+            summary = "Update customer",
+            description = "Replaces editable customer profile information"
+    )
     @PutMapping("/{customerId}")
     public ResponseEntity<ApiResponse<CustomerResponse>> updateCustomer(
             @PathVariable Long customerId,
@@ -152,6 +172,11 @@ public class CustomerController {
 
         return ResponseEntity.ok(response);
     }
+
+    @Operation(
+            summary = "Partially update customer",
+            description = "Updates only the customer fields supplied in the request"
+    )
     @PatchMapping("/{customerId}")
     public ResponseEntity<ApiResponse<CustomerResponse>> patchCustomer(
             @PathVariable Long customerId,
@@ -169,6 +194,11 @@ public class CustomerController {
 
         return ResponseEntity.ok(response);
     }
+
+    @Operation(
+            summary = "Deactivate customer",
+            description = "Changes an active customer to inactive status"
+    )
     @PatchMapping("/{customerId}/deactivate")
     public ResponseEntity<ApiResponse<CustomerResponse>> deactivateCustomer(
             @PathVariable Long customerId) {

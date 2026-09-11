@@ -1,0 +1,211 @@
+Day 10 - OpenAPI & Swagger Documentation
+
+Enterprise Financial Data Platform | Spring Boot 4.1.1 | springdoc-openapi 3.1.1
+
+1. Objective
+
+Add professional API documentation to Customer Service and Account Service using OpenAPI and Swagger UI. The goal was to make the existing REST endpoints discoverable and testable from a browser without changing runtime business behavior.
+
+2. Why OpenAPI and Swagger
+
+OpenAPI JSON is the machine-readable contract for the REST API, while Swagger UI is the human-friendly interactive view generated from that contract.
+
+OpenAPI JSON -> /v3/api-docs
+Swagger UI    -> /swagger-ui/index.html
+
+3. Dependency Added
+
+Added the Spring Boot 4-compatible springdoc dependency to both Customer Service and Account Service:
+
+<dependency>
+    <groupId>org.springdoc</groupId>
+    <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+    <version>3.1.1</version>
+</dependency>
+
+4. Customer Service OpenAPI Setup
+
+Verified raw OpenAPI JSON at http://localhost:8080/v3/api-docs.
+
+Verified Swagger UI at http://localhost:8080/swagger-ui/index.html.
+
+Confirmed customer endpoints, customer-address endpoints, DTO schemas, validation rules, enums, pagination, and query parameters were discovered automatically.
+
+The generated OpenAPI document initially used the default title 'OpenAPI definition' and version 'v0'.
+
+5. Customer Service Metadata
+
+Created:
+
+customer-service/src/main/java/com/financialplatform/customer/config/OpenApiConfig.java
+
+Title: Customer Service API
+
+Version: 1.0.0
+
+Description: customer profile management, search, lifecycle management, and customer address history.
+
+Contact name: Enterprise Financial Data Platform
+
+6. Account Service OpenAPI Setup
+
+Verified raw OpenAPI JSON at http://localhost:8081/v3/api-docs.
+
+Verified Swagger UI at http://localhost:8081/swagger-ui/index.html.
+
+Confirmed account creation, lookup, filtering, status-management, customer-account lookup, and account-closure endpoints were discovered.
+
+Created:
+
+account-service/src/main/java/com/financialplatform/account/config/OpenApiConfig.java
+
+Title: Account Service API
+
+Version: 1.0.0
+
+Description: account creation, retrieval, customer-account lookup, status management, and account closure.
+
+7. Controller Documentation Strategy
+
+We deliberately kept Swagger documentation lightweight. We added @Tag and @Operation to improve readability in Swagger UI, but did not fill every controller method with repeated response-code annotations.
+
+Runtime HTTP behavior continues to be controlled by Spring controllers and GlobalExceptionHandler.
+
+Swagger annotations document the API; they do not create HTTP status behavior.
+
+This avoids duplicating centralized error-handling knowledge in every controller.
+
+The approach keeps production controllers readable while still providing useful API documentation.
+
+8. Customer Controller Documentation
+
+Operation
+
+Swagger Summary
+
+GET /api/v1/customers
+
+Get customers
+
+POST /api/v1/customers
+
+Create customer
+
+GET /api/v1/customers/{customerId}
+
+Get customer by ID
+
+PUT /api/v1/customers/{customerId}
+
+Update customer
+
+PATCH /api/v1/customers/{customerId}
+
+Partially update customer
+
+PATCH /api/v1/customers/{customerId}/deactivate
+
+Deactivate customer
+
+GET /api/v1/customers/health
+
+Customer Service health check
+
+9. Customer Address Controller Documentation
+
+Operation
+
+Swagger Summary
+
+POST /api/v1/customers/{customerId}/addresses
+
+Add customer address
+
+GET /api/v1/customers/{customerId}/addresses
+
+Get customer address history
+
+GET /api/v1/customers/{customerId}/addresses/current
+
+Get current customer addresses
+
+GET /api/v1/customers/{customerId}/addresses/{addressId}
+
+Get customer address by ID
+
+10. Account Controller Documentation
+
+Operation
+
+Swagger Summary
+
+POST /api/v1/accounts
+
+Create account
+
+GET /api/v1/accounts
+
+Get accounts
+
+GET /api/v1/accounts/{accountId}
+
+Get account by ID
+
+GET /api/v1/accounts/customer/{customerId}
+
+Get accounts by customer
+
+PATCH /api/v1/accounts/{accountId}/status
+
+Update account status
+
+PATCH /api/v1/accounts/{accountId}/close
+
+Close account
+
+11. Important Learning: Runtime vs Documentation
+
+Springdoc can infer controller paths, DTO schemas, request bodies, validation constraints, and many success-response structures. However, it cannot always infer every downstream business exception or centralized @RestControllerAdvice mapping. For example, the application may return 404 through CustomerNotFoundException and GlobalExceptionHandler even when that behavior is not obvious from the controller method alone.
+
+We therefore treat OpenAPI as documentation of the runtime contract, not as the mechanism that implements the contract.
+
+12. Validation and Regression
+
+Customer Service Maven tests passed after adding springdoc and documentation annotations.
+
+Account Service Maven tests passed after adding springdoc and documentation annotations.
+
+Full multi-module regression passed with mvn clean test.
+
+Swagger UI was manually verified for Customer Service and Account Service.
+
+OpenAPI JSON was manually verified for both services.
+
+13. Git Workflow
+
+Day 10 work was accidentally committed on local develop. The changes were safely preserved by creating the feature branch from that commit, pushing the feature branch, then resetting local develop back to the Day 9 commit.
+
+git checkout -b feature/day-10-openapi-documentation
+git push -u origin feature/day-10-openapi-documentation
+git checkout develop
+git reset --hard HEAD~1
+
+After the reset, local develop matched origin/develop at the Day 9 commit, while Day 10 remained safely available on the feature branch.
+
+14. Day 10 Branch and PR
+
+Feature branch: feature/day-10-openapi-documentation
+
+PR title: Day 10: Add OpenAPI and Swagger Documentation
+
+Base branch: develop
+
+Compare branch: feature/day-10-openapi-documentation
+
+15. Interview Explanation
+
+I integrated springdoc-openapi into both microservices to generate OpenAPI specifications and Swagger UI automatically from the Spring MVC controllers and DTOs. I added service-level OpenAPI metadata and lightweight @Tag and @Operation annotations so the documentation is easy to navigate without cluttering the controllers. The runtime status handling remains in the controllers and centralized @RestControllerAdvice; Swagger is used to describe and test the API contract, not to implement it.
+
+16. Day 10 Result
+
+Both Customer Service and Account Service now expose machine-readable OpenAPI specifications and interactive Swagger UI documentation, with professional service metadata and readable endpoint grouping. Existing tests and runtime behavior remain unchanged.
