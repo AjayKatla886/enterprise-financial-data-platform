@@ -1,0 +1,149 @@
+Day 9 - API Testing & Error-Handling Hardening
+
+Enterprise Financial Data Platform | JUnit 5 | Mockito | MockMvc
+
+1. Objective
+
+Increase automated confidence around the Day 8 error contract and the HTTP controller layer. Day 9 adds focused exception-handler unit tests plus MockMvc controller tests without requiring Oracle or starting the full application.
+
+2. Test Layers
+
+Service unit tests
+      +
+GlobalExceptionHandler unit tests
+      +
+MockMvc controller/API tests
+      =
+Broader regression coverage
+
+3. Customer Error-Handler Tests
+
+Created customer exception-handler tests covering:
+
+CustomerNotFoundException -> 404 + CUS-001.
+
+AddressNotFoundException -> 404 + CUS-005.
+
+DuplicateCustomerException -> 409 + CUS-003.
+
+IllegalArgumentException -> 400 + VAL-002.
+
+Unexpected exception -> 500 + SYS-001.
+
+Request path and timestamp are populated where applicable.
+
+4. Account Error-Handler Tests
+
+AccountNotFoundException -> 404 + ACC-001.
+
+CustomerServiceUnavailableException -> 503 + DEP-001.
+
+IllegalArgumentException -> 400 + VAL-002.
+
+Unexpected exception -> 500 + SYS-001.
+
+The dependency failure test protects the service-to-service outage contract.
+
+5. Why Handler Tests Matter
+
+Existing service tests can still pass even if a developer accidentally maps an exception to the wrong API error code. Direct handler tests protect the mapping between exception type, HTTP status, stable error code, message, path, and timestamp.
+
+6. Customer Controller MockMvc Tests
+
+Invalid POST /api/v1/customers request -> HTTP 400 + VAL-001.
+
+Validation failure is handled through the real controller/advice HTTP pipeline.
+
+verifyNoInteractions(customerService) proves invalid input is rejected before business logic executes.
+
+Valid POST request -> CustomerService mock invoked -> HTTP 201 Created.
+
+Successful ApiResponse fields and returned CustomerResponse data are asserted.
+
+7. Account Controller MockMvc Tests
+
+Invalid POST /api/v1/accounts request -> HTTP 400 + VAL-001.
+
+Valid account request -> AccountService mock invoked -> HTTP 201 Created.
+
+Response assertions cover accountId, accountNumber, customerId, accountType, balance, and status.
+
+No Oracle database is required because the service layer is mocked.
+
+8. MockMvc Flow
+
+HTTP JSON Request
+      |
+MockMvc
+      |
+Controller
+      |
+@Valid / DTO deserialization
+      |
+Mocked Service OR GlobalExceptionHandler
+      |
+HTTP status + JSON assertions
+
+9. Test Commands Used
+
+PowerShell-specific quoted -D properties were used to prevent argument parsing issues:
+
+mvn -pl customer-service -am "-Dtest=CustomerControllerTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+
+mvn -pl account-service -am "-Dtest=AccountControllerTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+
+mvn clean test
+
+A first unquoted PowerShell command was parsed incorrectly as a Maven lifecycle phase; quoting the -D arguments fixed it. A missing static Mockito verify import was also corrected in CustomerControllerTest.
+
+10. Current Automated Coverage Added
+
+Layer
+
+Customer Service
+
+Account Service
+
+Service business logic
+
+Existing tests
+
+Existing tests
+
+GlobalExceptionHandler
+
+Added Day 9
+
+Added Day 9
+
+Controller/API via MockMvc
+
+Invalid + successful create
+
+Invalid + successful create
+
+11. Build Status
+
+Customer handler tests passed.
+
+Account handler tests passed.
+
+CustomerControllerTest passed with 2 tests.
+
+AccountControllerTest passed with 2 tests.
+
+Full backend Maven regression passed with BUILD SUCCESS.
+
+Work is on branch feature/day-9-api-testing-hardening.
+
+12. Git Checkpoints
+
+Committed handler tests with: Day 9: add standardized error handler tests.
+
+Controller API tests were prepared and full regression passed.
+
+At the point of these notes, the next planned action is to checkpoint/commit the controller tests if not already committed.
+
+13. Interview Explanation
+
+I used layered automated testing. Mockito unit tests validate business logic, direct GlobalExceptionHandler tests protect exception-to-error-code mappings, and standalone MockMvc tests verify the HTTP contract including validation, status codes, JSON structure, and controller-to-service interaction. The controller tests mock the service layer, so they are fast and do not require Oracle. Full integration tests with real infrastructure can be added later using Testcontainers.
