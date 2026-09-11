@@ -1,0 +1,183 @@
+Day 8 - Standardized API Error Handling & Error Codes
+
+Enterprise Financial Data Platform | Java 21 | Spring Boot 4.1.1
+
+1. Objective
+
+Standardize failure responses across Customer Service and Account Service before adding more microservices. The goal was to give clients a predictable error contract containing a stable error code, message, timestamp, request path, and the correct HTTP status.
+
+2. Architecture
+
+platform-common
+  ErrorCode
+  ErrorResponse
+      |
+Customer Service / Account Service
+      |
+GlobalExceptionHandler
+      |
+Consistent HTTP error response
+
+3. Shared Error Contract
+
+Created in platform-common:
+
+com.financialplatform.common.exception.ErrorCode - centralized technical/API error codes.
+
+com.financialplatform.common.exception.ErrorResponse - shared failure response record.
+
+Successful endpoints continue to use ApiResponse; ErrorResponse is dedicated to failures.
+
+public record ErrorResponse(
+    boolean success,
+    String errorCode,
+    String message,
+    LocalDateTime timestamp,
+    String path
+) {}
+
+4. Error Codes Introduced
+
+Code
+
+Meaning
+
+CUS-001
+
+Customer not found
+
+CUS-002
+
+Customer inactive (reserved for dedicated business exception)
+
+CUS-003
+
+Duplicate customer
+
+CUS-004
+
+Duplicate address (reserved for dedicated business exception)
+
+CUS-005
+
+Address not found
+
+ACC-001
+
+Account not found
+
+ACC-002
+
+Duplicate account type (reserved for dedicated business exception)
+
+ACC-003
+
+Invalid account state (reserved for dedicated business exception)
+
+ACC-004
+
+Account already closed (reserved for dedicated business exception)
+
+DEP-001
+
+Customer Service unavailable
+
+VAL-001
+
+Bean/request validation failure
+
+VAL-002
+
+Generic invalid request
+
+SYS-001
+
+Unexpected internal server error
+
+5. Customer Service Changes
+
+GlobalExceptionHandler now returns ErrorResponse instead of ApiResponse for failures.
+
+CustomerNotFoundException -> HTTP 404 + CUS-001.
+
+AddressNotFoundException -> HTTP 404 + CUS-005.
+
+DuplicateCustomerException -> HTTP 409 + CUS-003.
+
+MethodArgumentNotValidException and ConstraintViolationException -> HTTP 400 + VAL-001.
+
+Malformed JSON and generic IllegalArgumentException -> HTTP 400 + VAL-002.
+
+Unexpected exceptions -> HTTP 500 + SYS-001.
+
+A private buildErrorResponse helper removes repeated response-construction logic.
+
+6. Account Service Changes
+
+AccountNotFoundException -> HTTP 404 + ACC-001.
+
+CustomerServiceUnavailableException -> HTTP 503 + DEP-001.
+
+Validation failures -> HTTP 400 + VAL-001.
+
+Generic IllegalArgumentException -> HTTP 400 + VAL-002.
+
+Unexpected exceptions -> HTTP 500 + SYS-001.
+
+Existing dependency-outage behavior and HTTP statuses were preserved.
+
+7. Important Design Decision
+
+Error codes were kept in Java rather than an Oracle table because they are part of the application/API contract, not business data. Generic IllegalArgumentException was not falsely mapped to specific business codes. Dedicated business exceptions can be introduced later for cases such as inactive customer, duplicate address, duplicate account type, and invalid account lifecycle state.
+
+8. Manual Verification
+
+Scenario
+
+Expected Result
+
+Verified
+
+Missing customer
+
+404 + CUS-001
+
+Yes
+
+Invalid customer request
+
+400 + VAL-001
+
+Yes
+
+Missing account
+
+404 + ACC-001
+
+Yes
+
+Customer Service stopped during account creation
+
+503 + DEP-001
+
+Yes
+
+9. Build & Git
+
+platform-common test/build passed.
+
+Customer Service module tests passed after handler changes.
+
+Account Service module tests passed after handler changes.
+
+Full multi-module Maven regression: mvn clean test -> BUILD SUCCESS.
+
+Feature branch: feature/standardized-error-handling.
+
+PR title: Day 8: Standardize API Error Handling and Error Codes.
+
+Day 8 PR was merged into develop.
+
+10. Interview Explanation
+
+We standardized API failures across microservices by moving a shared ErrorCode enum and ErrorResponse contract into platform-common. Each service keeps its own domain exceptions and maps them through @RestControllerAdvice to the appropriate HTTP status and stable error code. This gives frontend and downstream consumers a predictable contract while keeping service-specific business logic isolated.
