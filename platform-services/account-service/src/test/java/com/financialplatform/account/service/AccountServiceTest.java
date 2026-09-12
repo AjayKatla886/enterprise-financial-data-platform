@@ -608,4 +608,44 @@ class AccountServiceTest {
                 .updatedAt(createdAt)
                 .build();
     }
+    @Test
+    void shouldRejectClosureWhenBalanceIsMissing() {
+        assertMissingBalanceClosureRejected(false);
+    }
+
+    @Test
+    void shouldRejectStatusClosureWhenBalanceIsMissing() {
+        assertMissingBalanceClosureRejected(true);
+    }
+
+    private void assertMissingBalanceClosureRejected(
+            boolean throughStatusUpdate) {
+
+        Account account = buildLifecycleAccount(null);
+        var originalUpdatedAt = account.getUpdatedAt();
+
+        when(accountRepository.findById(10L))
+                .thenReturn(java.util.Optional.of(account));
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> {
+                    if (throughStatusUpdate) {
+                        accountService.updateAccountStatus(
+                                10L,
+                                new AccountStatusRequest(AccountStatus.CLOSED)
+                        );
+                    } else {
+                        accountService.closeAccount(10L);
+                    }
+                }
+        );
+
+        assertEquals("Account balance is missing", exception.getMessage());
+        assertEquals(AccountStatus.ACTIVE, account.getAccountStatus());
+        assertNull(account.getBalance());
+        assertEquals(originalUpdatedAt, account.getUpdatedAt());
+
+        verify(accountRepository, never()).save(any(Account.class));
+    }
 }
