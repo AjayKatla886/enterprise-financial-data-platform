@@ -10,6 +10,8 @@ import com.financialplatform.account.entity.AccountType;
 import com.financialplatform.account.exception.AccountNotFoundException;
 import com.financialplatform.account.exception.CustomerServiceUnavailableException;
 import com.financialplatform.account.repository.AccountRepository;
+import com.financialplatform.account.exception.AccountBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +66,9 @@ class AccountServiceTest {
         when(customerClient.getCustomerById(3L))
                 .thenReturn(customer);
 
+        when(customerClient.isCustomerKycVerified(3L))
+                .thenReturn(true);
+
         when(accountRepository.existsByCustomerIdAndAccountType(
                 3L,
                 AccountType.SAVINGS))
@@ -92,6 +97,9 @@ class AccountServiceTest {
         assertEquals("ACTIVE", response.accountStatus());
 
         verify(customerClient).getCustomerById(3L);
+
+        verify(customerClient)
+                .isCustomerKycVerified(3L);
 
         verify(accountRepository)
                 .existsByCustomerIdAndAccountType(
@@ -126,13 +134,13 @@ class AccountServiceTest {
                         AccountType.SAVINGS
                 );
 
-        IllegalArgumentException exception =
+        AccountBusinessException exception =
                 assertThrows(
-                        IllegalArgumentException.class,
-                        () -> accountService.createAccount(
-                                inactiveCustomerRequest
-                        )
+                        AccountBusinessException.class,
+                        () -> accountService.createAccount(inactiveCustomerRequest)
                 );
+
+        assertEquals(ErrorCode.CUSTOMER_INACTIVE, exception.getErrorCode());
 
         assertEquals(
                 "Account cannot be created for an inactive customer",
@@ -226,6 +234,9 @@ class AccountServiceTest {
         when(customerClient.getCustomerById(3L))
                 .thenReturn(customer);
 
+        when(customerClient.isCustomerKycVerified(3L))
+                .thenReturn(true);
+
         when(accountRepository.existsByCustomerIdAndAccountType(
                 3L,
                 AccountType.SAVINGS))
@@ -237,11 +248,13 @@ class AccountServiceTest {
                         AccountType.SAVINGS
                 );
 
-        IllegalArgumentException exception =
+        AccountBusinessException exception =
                 assertThrows(
-                        IllegalArgumentException.class,
+                        AccountBusinessException.class,
                         () -> accountService.createAccount(request)
                 );
+
+        assertEquals(ErrorCode.DUPLICATE_ACCOUNT_TYPE, exception.getErrorCode());
 
         assertEquals(
                 "Customer already has an account of type: SAVINGS",
@@ -251,14 +264,14 @@ class AccountServiceTest {
         verify(customerClient)
                 .getCustomerById(3L);
 
+        verify(customerClient)
+                .isCustomerKycVerified(3L);
+
         verify(accountRepository)
                 .existsByCustomerIdAndAccountType(
                         3L,
                         AccountType.SAVINGS
                 );
-
-        verify(accountRepository, never())
-                .saveAndFlush(any(Account.class));
     }
     @Test
     void shouldRejectStatusChangeForClosedAccount() {
@@ -278,14 +291,13 @@ class AccountServiceTest {
         AccountStatusRequest request =
                 new AccountStatusRequest(AccountStatus.ACTIVE);
 
-        IllegalArgumentException exception =
+        AccountBusinessException exception =
                 assertThrows(
-                        IllegalArgumentException.class,
-                        () -> accountService.updateAccountStatus(
-                                10L,
-                                request
-                        )
+                        AccountBusinessException.class,
+                        () -> accountService.updateAccountStatus(10L, request)
                 );
+
+        assertEquals(ErrorCode.INVALID_ACCOUNT_STATE, exception.getErrorCode());
 
         assertEquals(
                 "Closed account status cannot be changed",
@@ -345,11 +357,13 @@ class AccountServiceTest {
         when(accountRepository.findById(10L))
                 .thenReturn(java.util.Optional.of(closedAccount));
 
-        IllegalArgumentException exception =
+        AccountBusinessException exception =
                 assertThrows(
-                        IllegalArgumentException.class,
+                        AccountBusinessException.class,
                         () -> accountService.closeAccount(10L)
                 );
+
+        assertEquals(ErrorCode.ACCOUNT_ALREADY_CLOSED, exception.getErrorCode());
 
         assertEquals(
                 "Account is already closed",
@@ -407,5 +421,51 @@ class AccountServiceTest {
         );
 
         verify(accountRepository).findById(999L);
+    }
+    @Test
+    void shouldRejectAccountCreationWhenKycNotVerified() {
+
+        CustomerClient.CustomerLookupResponse customer =
+                new CustomerClient.CustomerLookupResponse(
+                        3L,
+                        "000003",
+                        "Priya",
+                        "Reddy",
+                        "ACTIVE"
+                );
+
+        when(customerClient.getCustomerById(3L))
+                .thenReturn(customer);
+
+        when(customerClient.isCustomerKycVerified(3L))
+                .thenReturn(false);
+
+        AccountBusinessException exception =
+                assertThrows(
+                        AccountBusinessException.class,
+                        () -> accountService.createAccount(request)
+                );
+
+        assertEquals(ErrorCode.CUSTOMER_KYC_NOT_VERIFIED, exception.getErrorCode());
+
+        assertEquals(
+                "Account cannot be created because customer KYC is not verified. customerId=3",
+                exception.getMessage()
+        );
+
+        verify(customerClient)
+                .getCustomerById(3L);
+
+        verify(customerClient)
+                .isCustomerKycVerified(3L);
+
+        verify(accountRepository, never())
+                .existsByCustomerIdAndAccountType(
+                        anyLong(),
+                        any(AccountType.class)
+                );
+
+        verify(accountRepository, never())
+                .saveAndFlush(any(Account.class));
     }
 }

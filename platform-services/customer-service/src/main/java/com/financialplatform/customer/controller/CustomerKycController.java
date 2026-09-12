@@ -77,13 +77,35 @@ public class CustomerKycController {
         CustomerKycResponse response =
                 customerKycService.updateKycStatus(customerId, request);
 
+        String message = getKycStatusMessage(response.kycStatus());
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
-                        "Customer KYC status updated successfully",
+                        message,
                         response
                 )
         );
+    }
+    private String getKycStatusMessage(String status) {
+
+        return switch (status) {
+
+            case "PENDING" ->
+                    "KYC submitted successfully and is awaiting verification.";
+
+            case "VERIFIED" ->
+                    "KYC verified successfully.";
+
+            case "REVIEW_REQUIRED" ->
+                    "KYC requires additional review.";
+
+            case "REJECTED" ->
+                    "KYC verification was rejected.";
+
+            default ->
+                    "KYC status updated successfully.";
+        };
     }
 
 }

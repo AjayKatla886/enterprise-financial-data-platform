@@ -178,4 +178,22 @@ public class GlobalExceptionHandler {
                 .status(status)
                 .body(response);
     }
+    @ExceptionHandler(AccountBusinessException.class)
+    public ResponseEntity<ErrorResponse> handleAccountBusinessException(
+            AccountBusinessException ex,
+            HttpServletRequest request) {
+
+        log.warn(
+                "Account business rule rejected. errorCode={}, message={}",
+                ex.getErrorCode().getCode(),
+                ex.getMessage()
+        );
+
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request
+        );
+    }
 }
