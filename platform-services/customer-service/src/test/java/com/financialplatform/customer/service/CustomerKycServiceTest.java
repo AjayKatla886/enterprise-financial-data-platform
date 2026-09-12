@@ -3,10 +3,8 @@ package com.financialplatform.customer.service;
 import com.financialplatform.customer.dto.CustomerKycRequest;
 import com.financialplatform.customer.dto.CustomerKycStatusRequest;
 import com.financialplatform.customer.entity.*;
-import com.financialplatform.customer.exception.CustomerKycNotFoundException;
-import com.financialplatform.customer.exception.CustomerNotFoundException;
-import com.financialplatform.customer.exception.DuplicateCustomerKycException;
-import com.financialplatform.customer.exception.KycCustomerInactiveException;
+import com.financialplatform.customer.exception.CustomerBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import com.financialplatform.customer.repository.CustomerKycRepository;
 import com.financialplatform.customer.repository.CustomerRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,15 +81,17 @@ class CustomerKycServiceTest {
         when(customerRepository.findById(1L))
                 .thenReturn(Optional.of(activeCustomer));
 
-        assertThrows(
-                KycCustomerInactiveException.class,
+        CustomerBusinessException exception = assertThrows(
+                CustomerBusinessException.class,
                 () -> customerKycService.createKyc(
                         1L,
-                        new CustomerKycRequest(
-                                DocumentType.PASSPORT,
-                                "P1234567"
-                        )
+                        new CustomerKycRequest(DocumentType.PASSPORT, "P1234567")
                 )
+        );
+
+        assertEquals(
+                ErrorCode.KYC_CUSTOMER_INACTIVE,
+                exception.getErrorCode()
         );
 
         verifyNoInteractions(customerKycRepository);
@@ -106,15 +106,17 @@ class CustomerKycServiceTest {
         when(customerKycRepository.existsByCustomerId(1L))
                 .thenReturn(true);
 
-        assertThrows(
-                DuplicateCustomerKycException.class,
+        CustomerBusinessException exception = assertThrows(
+                CustomerBusinessException.class,
                 () -> customerKycService.createKyc(
                         1L,
-                        new CustomerKycRequest(
-                                DocumentType.PASSPORT,
-                                "P1234567"
-                        )
+                        new CustomerKycRequest(DocumentType.PASSPORT, "P1234567")
                 )
+        );
+
+        assertEquals(
+                ErrorCode.DUPLICATE_CUSTOMER_KYC,
+                exception.getErrorCode()
         );
 
         verify(customerKycRepository, never())
@@ -127,15 +129,17 @@ class CustomerKycServiceTest {
         when(customerRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        assertThrows(
-                CustomerNotFoundException.class,
+        CustomerBusinessException exception = assertThrows(
+                CustomerBusinessException.class,
                 () -> customerKycService.createKyc(
                         999L,
-                        new CustomerKycRequest(
-                                DocumentType.PASSPORT,
-                                "P1234567"
-                        )
+                        new CustomerKycRequest(DocumentType.PASSPORT, "P1234567")
                 )
+        );
+
+        assertEquals(
+                ErrorCode.CUSTOMER_NOT_FOUND,
+                exception.getErrorCode()
         );
     }
 
@@ -160,10 +164,14 @@ class CustomerKycServiceTest {
         when(customerKycRepository.findByCustomerId(1L))
                 .thenReturn(Optional.empty());
 
-        assertThrows(
-                CustomerKycNotFoundException.class,
-                () -> customerKycService
-                        .getKycByCustomerId(1L)
+        CustomerBusinessException exception = assertThrows(
+                CustomerBusinessException.class,
+                () -> customerKycService.getKycByCustomerId(1L)
+        );
+
+        assertEquals(
+                ErrorCode.KYC_NOT_FOUND,
+                exception.getErrorCode()
         );
     }
 

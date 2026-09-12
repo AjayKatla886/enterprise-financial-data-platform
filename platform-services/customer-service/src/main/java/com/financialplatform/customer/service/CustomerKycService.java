@@ -6,10 +6,8 @@ import com.financialplatform.customer.dto.CustomerKycStatusRequest;
 import com.financialplatform.customer.entity.Customer;
 import com.financialplatform.customer.entity.CustomerKyc;
 import com.financialplatform.customer.entity.KycStatus;
-import com.financialplatform.customer.exception.KycCustomerInactiveException;
-import com.financialplatform.customer.exception.CustomerKycNotFoundException;
-import com.financialplatform.customer.exception.CustomerNotFoundException;
-import com.financialplatform.customer.exception.DuplicateCustomerKycException;
+import com.financialplatform.customer.exception.CustomerBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import com.financialplatform.customer.mapper.CustomerKycMapper;
 import com.financialplatform.customer.repository.CustomerKycRepository;
 import com.financialplatform.customer.repository.CustomerRepository;
@@ -36,18 +34,21 @@ public class CustomerKycService {
             CustomerKycRequest request) {
 
         Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() ->
-                        new CustomerNotFoundException(customerId)
-                );
+                .orElseThrow(() -> new CustomerBusinessException(
+                        ErrorCode.CUSTOMER_NOT_FOUND,
+                        "Customer not found with ID: " + customerId
+                ));
 
         if (customer.getCustomerStatus() != CustomerStatus.ACTIVE) {
-            throw new KycCustomerInactiveException(
+            throw new CustomerBusinessException(
+                    ErrorCode.KYC_CUSTOMER_INACTIVE,
                     "KYC can be created only for active customers"
             );
         }
 
         if (customerKycRepository.existsByCustomerId(customerId)) {
-            throw new DuplicateCustomerKycException(
+            throw new CustomerBusinessException(
+                    ErrorCode.DUPLICATE_CUSTOMER_KYC,
                     "KYC already exists for customer ID: " + customerId
             );
         }
@@ -78,11 +79,10 @@ public class CustomerKycService {
 
         CustomerKyc kyc = customerKycRepository
                 .findByCustomerId(customerId)
-                .orElseThrow(() ->
-                        new CustomerKycNotFoundException(
-                                "KYC not found for customer ID: " + customerId
-                        )
-                );
+                .orElseThrow(() -> new CustomerBusinessException(
+                        ErrorCode.KYC_NOT_FOUND,
+                        "KYC not found for customer ID: " + customerId
+                ));
 
         return CustomerKycMapper.toResponse(kyc);
     }
@@ -94,11 +94,10 @@ public class CustomerKycService {
 
         CustomerKyc kyc = customerKycRepository
                 .findByCustomerId(customerId)
-                .orElseThrow(() ->
-                        new CustomerKycNotFoundException(
-                                "KYC not found for customer ID: " + customerId
-                        )
-                );
+                .orElseThrow(() -> new CustomerBusinessException(
+                        ErrorCode.KYC_NOT_FOUND,
+                        "KYC not found for customer ID: " + customerId
+                ));
 
         KycStatus newStatus = request.kycStatus();
 

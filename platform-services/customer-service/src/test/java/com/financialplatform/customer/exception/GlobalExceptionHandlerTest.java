@@ -29,14 +29,14 @@ class GlobalExceptionHandlerTest {
     @Test
     void shouldReturnCus001WhenCustomerNotFound() {
 
-        CustomerNotFoundException exception =
-                new CustomerNotFoundException(999999L);
+        CustomerBusinessException exception =
+                new CustomerBusinessException(
+                        ErrorCode.CUSTOMER_NOT_FOUND,
+                        "Customer not found with ID: 999999"
+                );
 
         ResponseEntity<ErrorResponse> response =
-                handler.handleCustomerNotFound(
-                        exception,
-                        request
-                );
+                handler.handleCustomerBusinessException(exception, request);
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
         assertNotNull(response.getBody());
@@ -59,14 +59,14 @@ class GlobalExceptionHandlerTest {
         when(request.getRequestURI())
                 .thenReturn("/api/v1/customers/1/addresses/999");
 
-        AddressNotFoundException exception =
-                new AddressNotFoundException(999L);
+        CustomerBusinessException exception =
+                new CustomerBusinessException(
+                        ErrorCode.ADDRESS_NOT_FOUND,
+                        "Address not found with ID: 999"
+                );
 
         ResponseEntity<ErrorResponse> response =
-                handler.handleAddressNotFound(
-                        exception,
-                        request
-                );
+                handler.handleCustomerBusinessException(exception, request);
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
         assertNotNull(response.getBody());
@@ -84,16 +84,14 @@ class GlobalExceptionHandlerTest {
     @Test
     void shouldReturnCus003WhenDuplicateCustomer() {
 
-        DuplicateCustomerException exception =
-                new DuplicateCustomerException(
+        CustomerBusinessException exception =
+                new CustomerBusinessException(
+                        ErrorCode.DUPLICATE_CUSTOMER,
                         "Customer already exists"
                 );
 
         ResponseEntity<ErrorResponse> response =
-                handler.handleDuplicateCustomer(
-                        exception,
-                        request
-                );
+                handler.handleCustomerBusinessException(exception, request);
 
         assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
         assertNotNull(response.getBody());

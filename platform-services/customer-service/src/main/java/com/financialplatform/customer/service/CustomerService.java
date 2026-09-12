@@ -6,12 +6,12 @@ import com.financialplatform.customer.dto.CustomerRequest;
 import com.financialplatform.customer.dto.CustomerResponse;
 import com.financialplatform.customer.entity.Customer;
 import com.financialplatform.customer.entity.CustomerStatus;
-import com.financialplatform.customer.exception.CustomerNotFoundException;
-import com.financialplatform.customer.exception.DuplicateCustomerException;
 import com.financialplatform.customer.mapper.CustomerMapper;
 import com.financialplatform.customer.repository.CustomerRepository;
 import com.financialplatform.customer.specification.CustomerSpecification;
 import jakarta.persistence.EntityManager;
+import com.financialplatform.customer.exception.CustomerBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -193,7 +193,10 @@ public class CustomerService {
                                     customerId
                             );
 
-                            return new CustomerNotFoundException(customerId);
+                            return new CustomerBusinessException(
+                                    ErrorCode.CUSTOMER_NOT_FOUND,
+                                    "Customer not found with ID: " + customerId
+                            );
                         });
 
         return CustomerMapper.toResponse(customer);
@@ -210,7 +213,8 @@ public class CustomerService {
                     "Customer creation rejected because email already exists"
             );
 
-            throw new DuplicateCustomerException(
+            throw new CustomerBusinessException(
+                    ErrorCode.DUPLICATE_CUSTOMER,
                     "Customer with this email already exists"
             );
         }
@@ -283,7 +287,10 @@ public class CustomerService {
                                     customerId
                             );
 
-                            return new CustomerNotFoundException(customerId);
+                            return new CustomerBusinessException(
+                                    ErrorCode.CUSTOMER_NOT_FOUND,
+                                    "Customer not found with ID: " + customerId
+                            );
                         });
 
         if (!customer.getEmail()
@@ -296,7 +303,8 @@ public class CustomerService {
                     customerId
             );
 
-            throw new DuplicateCustomerException(
+            throw new CustomerBusinessException(
+                    ErrorCode.DUPLICATE_CUSTOMER,
                     "Customer with this email already exists"
             );
         }
@@ -358,7 +366,10 @@ public class CustomerService {
                                     customerId
                             );
 
-                            return new CustomerNotFoundException(customerId);
+                            return new CustomerBusinessException(
+                                    ErrorCode.CUSTOMER_NOT_FOUND,
+                                    "Customer not found with ID: " + customerId
+                            );
                         });
 
         if (request.firstName() != null) {
@@ -392,7 +403,8 @@ public class CustomerService {
                         customerId
                 );
 
-                throw new DuplicateCustomerException(
+                throw new CustomerBusinessException(
+                        ErrorCode.DUPLICATE_CUSTOMER,
                         "Customer with this email already exists"
                 );
             }
@@ -448,7 +460,10 @@ public class CustomerService {
                                     customerId
                             );
 
-                            return new CustomerNotFoundException(customerId);
+                            throw new CustomerBusinessException(
+                                    ErrorCode.CUSTOMER_INACTIVE,
+                                    "Customer is already inactive"
+                            );
                         });
 
         if (customer.getCustomerStatus()
@@ -459,7 +474,8 @@ public class CustomerService {
                     customerId
             );
 
-            throw new IllegalArgumentException(
+            throw new CustomerBusinessException(
+                    ErrorCode.CUSTOMER_INACTIVE,
                     "Customer is already inactive"
             );
         }

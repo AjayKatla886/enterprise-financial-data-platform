@@ -11,8 +11,8 @@ import com.financialplatform.customer.dto.CustomerResponse;
 import com.financialplatform.customer.entity.Customer;
 import com.financialplatform.customer.entity.CustomerStatus;
 import org.junit.jupiter.api.Test;
-import com.financialplatform.customer.exception.DuplicateCustomerException;
-import com.financialplatform.customer.exception.CustomerNotFoundException;
+import com.financialplatform.customer.exception.CustomerBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import com.financialplatform.customer.dto.CustomerPatchRequest;
 
 import java.time.LocalDate;
@@ -111,15 +111,15 @@ class CustomerServiceTest {
                 "ajay.test@example.com"
         )).thenReturn(true);
 
-        DuplicateCustomerException exception =
+        CustomerBusinessException exception =
                 assertThrows(
-                        DuplicateCustomerException.class,
+                        CustomerBusinessException.class,
                         () -> customerService.createCustomer(request)
                 );
 
         assertEquals(
-                "Customer with this email already exists",
-                exception.getMessage()
+                ErrorCode.DUPLICATE_CUSTOMER,
+                exception.getErrorCode()
         );
 
         verify(customerRepository)
@@ -174,14 +174,19 @@ class CustomerServiceTest {
         when(customerRepository.findById(999L))
                 .thenReturn(java.util.Optional.empty());
 
-        CustomerNotFoundException exception =
+        CustomerBusinessException exception =
                 assertThrows(
-                        CustomerNotFoundException.class,
+                        CustomerBusinessException.class,
                         () -> customerService.getCustomerById(999L)
                 );
 
         assertEquals(
-                "Customer not found with id: 999",
+                ErrorCode.CUSTOMER_NOT_FOUND,
+                exception.getErrorCode()
+        );
+
+        assertEquals(
+                "Customer not found with ID: 999",
                 exception.getMessage()
         );
 
@@ -244,9 +249,9 @@ class CustomerServiceTest {
         when(customerRepository.findById(10L))
                 .thenReturn(java.util.Optional.of(customer));
 
-        IllegalArgumentException exception =
+        CustomerBusinessException exception =
                 assertThrows(
-                        IllegalArgumentException.class,
+                        CustomerBusinessException.class,
                         () -> customerService.deactivateCustomer(10L)
                 );
 
@@ -348,15 +353,15 @@ class CustomerServiceTest {
                 "existing@example.com"
         )).thenReturn(true);
 
-        DuplicateCustomerException exception =
+        CustomerBusinessException exception =
                 assertThrows(
-                        DuplicateCustomerException.class,
+                        CustomerBusinessException.class,
                         () -> customerService.updateCustomer(10L, request)
                 );
 
         assertEquals(
-                "Customer with this email already exists",
-                exception.getMessage()
+                ErrorCode.DUPLICATE_CUSTOMER,
+                exception.getErrorCode()
         );
 
         verify(customerRepository).findById(10L);
@@ -485,15 +490,15 @@ class CustomerServiceTest {
                 "existing@example.com"
         )).thenReturn(true);
 
-        DuplicateCustomerException exception =
+        CustomerBusinessException exception =
                 assertThrows(
-                        DuplicateCustomerException.class,
+                        CustomerBusinessException.class,
                         () -> customerService.patchCustomer(10L, request)
                 );
 
         assertEquals(
-                "Customer with this email already exists",
-                exception.getMessage()
+                ErrorCode.DUPLICATE_CUSTOMER,
+                exception.getErrorCode()
         );
 
         verify(customerRepository).findById(10L);

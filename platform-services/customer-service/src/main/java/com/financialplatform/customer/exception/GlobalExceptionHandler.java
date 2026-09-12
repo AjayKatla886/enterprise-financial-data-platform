@@ -21,49 +21,45 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(CustomerNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleCustomerNotFound(
-            CustomerNotFoundException ex,
+    @ExceptionHandler(CustomerBusinessException.class)
+    public ResponseEntity<ErrorResponse> handleCustomerBusinessException(
+            CustomerBusinessException ex,
             HttpServletRequest request) {
 
-        log.warn("Customer not found exception. message={}", ex.getMessage());
+        HttpStatus status = switch (ex.getErrorCode()) {
+            case CUSTOMER_NOT_FOUND, ADDRESS_NOT_FOUND, KYC_NOT_FOUND ->
+                    HttpStatus.NOT_FOUND;
 
-        return buildErrorResponse(
-                HttpStatus.NOT_FOUND,
-                ErrorCode.CUSTOMER_NOT_FOUND,
-                ex.getMessage(),
-                request
-        );
-    }
+            case CUSTOMER_INACTIVE,
+                 DUPLICATE_CUSTOMER,
+                 DUPLICATE_ADDRESS,
+                 DUPLICATE_CUSTOMER_KYC,
+                 KYC_CUSTOMER_INACTIVE ->
+                    HttpStatus.CONFLICT;
 
-    @ExceptionHandler(AddressNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleAddressNotFound(
-            AddressNotFoundException ex,
-            HttpServletRequest request) {
+            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+        };
 
-        log.warn("Customer address not found. message={}", ex.getMessage());
+        if (status == HttpStatus.INTERNAL_SERVER_ERROR) {
+            log.error("Unmapped customer business error", ex);
 
-        return buildErrorResponse(
-                HttpStatus.NOT_FOUND,
-                ErrorCode.ADDRESS_NOT_FOUND,
-                ex.getMessage(),
-                request
-        );
-    }
-
-    @ExceptionHandler(DuplicateCustomerException.class)
-    public ResponseEntity<ErrorResponse> handleDuplicateCustomer(
-            DuplicateCustomerException ex,
-            HttpServletRequest request) {
+            return buildErrorResponse(
+                    status,
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                    "An unexpected error occurred",
+                    request
+            );
+        }
 
         log.warn(
-                "Duplicate customer operation rejected. message={}",
+                "Customer business rule rejected. errorCode={}, message={}",
+                ex.getErrorCode().getCode(),
                 ex.getMessage()
         );
 
         return buildErrorResponse(
-                HttpStatus.CONFLICT,
-                ErrorCode.DUPLICATE_CUSTOMER,
+                status,
+                ex.getErrorCode(),
                 ex.getMessage(),
                 request
         );
@@ -206,42 +202,7 @@ public class GlobalExceptionHandler {
                 .status(status)
                 .body(response);
     }
-    @ExceptionHandler(CustomerKycNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleCustomerKycNotFound(
-            CustomerKycNotFoundException ex,
-            HttpServletRequest request) {
 
-        return buildErrorResponse(
-                HttpStatus.NOT_FOUND,
-                ErrorCode.KYC_NOT_FOUND,
-                ex.getMessage(),
-                request
-        );
-    }
-    @ExceptionHandler(DuplicateCustomerKycException.class)
-    public ResponseEntity<ErrorResponse> handleDuplicateCustomerKyc(
-            DuplicateCustomerKycException ex,
-            HttpServletRequest request) {
-
-        return buildErrorResponse(
-                HttpStatus.CONFLICT,
-                ErrorCode.DUPLICATE_CUSTOMER_KYC,
-                ex.getMessage(),
-                request
-        );
-    }
-    @ExceptionHandler(KycCustomerInactiveException.class)
-    public ResponseEntity<ErrorResponse> handleKycCustomerInactive(
-            KycCustomerInactiveException ex,
-            HttpServletRequest request) {
-
-        return buildErrorResponse(
-                HttpStatus.CONFLICT,
-                ErrorCode.KYC_CUSTOMER_INACTIVE,
-                ex.getMessage(),
-                request
-        );
-    }
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatch(
             MethodArgumentTypeMismatchException ex,

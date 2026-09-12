@@ -7,8 +7,8 @@ import com.financialplatform.customer.entity.CustomerAddress;
 import com.financialplatform.customer.entity.CustomerStatus;
 import com.financialplatform.customer.repository.CustomerAddressRepository;
 import com.financialplatform.customer.repository.CustomerRepository;
-import com.financialplatform.customer.exception.AddressNotFoundException;
-import com.financialplatform.customer.exception.CustomerNotFoundException;
+import com.financialplatform.customer.exception.CustomerBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import com.financialplatform.customer.entity.AddressType;
@@ -138,18 +138,15 @@ class CustomerAddressServiceTest {
         when(customerRepository.findById(10L))
                 .thenReturn(Optional.of(customer));
 
-        IllegalArgumentException exception =
+        CustomerBusinessException exception =
                 assertThrows(
-                        IllegalArgumentException.class,
-                        () -> customerAddressService.addAddress(
-                                10L,
-                                request
-                        )
+                        CustomerBusinessException.class,
+                        () -> customerAddressService.addAddress(10L, request)
                 );
 
         assertEquals(
-                "Address cannot be added for an inactive customer",
-                exception.getMessage()
+                ErrorCode.CUSTOMER_INACTIVE,
+                exception.getErrorCode()
         );
 
         verify(customerRepository)
@@ -199,18 +196,15 @@ class CustomerAddressServiceTest {
                 ))
                 .thenReturn(Optional.of(existingAddress));
 
-        IllegalArgumentException exception =
+        CustomerBusinessException exception =
                 assertThrows(
-                        IllegalArgumentException.class,
-                        () -> customerAddressService.addAddress(
-                                10L,
-                                request
-                        )
+                        CustomerBusinessException.class,
+                        () -> customerAddressService.addAddress(10L, request)
                 );
 
         assertEquals(
-                "The same current address already exists for this address type",
-                exception.getMessage()
+                ErrorCode.DUPLICATE_ADDRESS,
+                exception.getErrorCode()
         );
 
         verify(customerRepository)
@@ -514,12 +508,15 @@ class CustomerAddressServiceTest {
         when(customerAddressRepository.findById(101L))
                 .thenReturn(Optional.of(address));
 
-        assertThrows(
-                AddressNotFoundException.class,
-                () -> customerAddressService.getAddressById(
-                        10L,
-                        101L
-                )
+        CustomerBusinessException exception =
+                assertThrows(
+                        CustomerBusinessException.class,
+                        () -> customerAddressService.getAddressById(10L, 101L)
+                );
+
+        assertEquals(
+                ErrorCode.ADDRESS_NOT_FOUND,
+                exception.getErrorCode()
         );
 
         verify(customerRepository)
@@ -537,12 +534,15 @@ class CustomerAddressServiceTest {
         when(customerAddressRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        assertThrows(
-                AddressNotFoundException.class,
-                () -> customerAddressService.getAddressById(
-                        10L,
-                        999L
-                )
+        CustomerBusinessException exception =
+                assertThrows(
+                        CustomerBusinessException.class,
+                        () -> customerAddressService.getAddressById(10L, 999L)
+                );
+
+        assertEquals(
+                ErrorCode.ADDRESS_NOT_FOUND,
+                exception.getErrorCode()
         );
 
         verify(customerRepository)
@@ -557,12 +557,15 @@ class CustomerAddressServiceTest {
         when(customerRepository.existsById(999L))
                 .thenReturn(false);
 
-        assertThrows(
-                CustomerNotFoundException.class,
-                () -> customerAddressService.getAddressById(
-                        999L,
-                        101L
-                )
+        CustomerBusinessException exception =
+                assertThrows(
+                        CustomerBusinessException.class,
+                        () -> customerAddressService.getAddressById(999L, 101L)
+                );
+
+        assertEquals(
+                ErrorCode.CUSTOMER_NOT_FOUND,
+                exception.getErrorCode()
         );
 
         verify(customerRepository)
