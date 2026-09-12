@@ -33,7 +33,8 @@ public class AccountController {
 
     @Operation(
             summary = "Create account",
-            description = "Creates a new financial account for an existing active customer"
+            description = "Requires an active customer with verified KYC. "
+                    + "Business conflicts return HTTP 409."
     )
     @PostMapping
     public ResponseEntity<ApiResponse<AccountResponse>> createAccount(
@@ -98,7 +99,9 @@ public class AccountController {
 
     @Operation(
             summary = "Update account status",
-            description = "Updates the lifecycle status of an account according to account-state rules"
+            description = "Closed accounts cannot change status. "
+                    + "Changing status to CLOSED requires zero balance. "
+                    + "Business conflicts return HTTP 409."
     )
     @PatchMapping("/{accountId}/status")
     public ResponseEntity<ApiResponse<AccountResponse>> updateAccountStatus(
@@ -120,7 +123,8 @@ public class AccountController {
 
     @Operation(
             summary = "Close account",
-            description = "Moves an eligible account to the final CLOSED status"
+            description = "Closes an account only when its balance is zero. "
+                    + "Already closed accounts and nonzero balances return HTTP 409."
     )
     @PatchMapping("/{accountId}/close")
     public ResponseEntity<ApiResponse<AccountResponse>> closeAccount(
