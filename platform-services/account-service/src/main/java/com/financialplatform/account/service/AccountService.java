@@ -1,19 +1,19 @@
 package com.financialplatform.account.service;
 
+import com.financialplatform.account.client.CustomerClient;
 import com.financialplatform.account.dto.AccountRequest;
 import com.financialplatform.account.dto.AccountResponse;
 import com.financialplatform.account.dto.AccountStatusRequest;
 import com.financialplatform.account.entity.Account;
 import com.financialplatform.account.entity.AccountStatus;
+import com.financialplatform.account.exception.AccountBusinessException;
 import com.financialplatform.account.exception.AccountNotFoundException;
 import com.financialplatform.account.mapper.AccountMapper;
 import com.financialplatform.account.repository.AccountRepository;
 import com.financialplatform.account.repository.AccountSpecifications;
-import com.financialplatform.common.response.PageResponse;
-import com.financialplatform.account.exception.AccountBusinessException;
 import com.financialplatform.common.exception.ErrorCode;
+import com.financialplatform.common.response.PageResponse;
 import jakarta.persistence.EntityManager;
-import com.financialplatform.account.client.CustomerClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -68,12 +68,13 @@ public class AccountService {
                     request.customerId(),
                     customer.customerStatus()
             );
+
             throw new AccountBusinessException(
                     ErrorCode.CUSTOMER_INACTIVE,
                     "Account cannot be created for an inactive customer"
             );
         }
-        // KYC verification
+
         if (!customerClient.isCustomerKycVerified(request.customerId())) {
 
             log.warn(
@@ -87,7 +88,7 @@ public class AccountService {
                             + request.customerId()
             );
         }
-        // Duplicate account type validation
+
         if (accountRepository.existsByCustomerIdAndAccountType(
                 request.customerId(),
                 request.accountType())) {
@@ -100,7 +101,8 @@ public class AccountService {
 
             throw new AccountBusinessException(
                     ErrorCode.DUPLICATE_ACCOUNT_TYPE,
-                    "Customer already has an account of type: " + request.accountType()
+                    "Customer already has an account of type: "
+                            + request.accountType()
             );
         }
 
@@ -130,23 +132,15 @@ public class AccountService {
 
     public AccountResponse getAccountById(Long accountId) {
 
-        log.debug(
-                "Fetching account. accountId={}",
-                accountId
-        );
+        log.debug("Fetching account. accountId={}", accountId);
 
-        Account account =
-                accountRepository.findById(accountId)
-                        .orElseThrow(() ->
-                                new AccountNotFoundException(accountId)
-                        );
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
 
         return AccountMapper.toResponse(account);
     }
 
-    public List<AccountResponse> getAccountsByCustomerId(
-            Long customerId
-    ) {
+    public List<AccountResponse> getAccountsByCustomerId(Long customerId) {
 
         log.debug(
                 "Fetching accounts for customer. customerId={}",
@@ -171,8 +165,7 @@ public class AccountService {
     @Transactional
     public AccountResponse updateAccountStatus(
             Long accountId,
-            AccountStatusRequest request
-    ) {
+            AccountStatusRequest request) {
 
         log.info(
                 "Account status update requested. accountId={}, requestedStatus={}",
@@ -180,14 +173,10 @@ public class AccountService {
                 request.accountStatus()
         );
 
-        Account account =
-                accountRepository.findById(accountId)
-                        .orElseThrow(() ->
-                                new AccountNotFoundException(accountId)
-                        );
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
 
-        if (account.getAccountStatus()
-                == AccountStatus.CLOSED) {
+        if (account.getAccountStatus() == AccountStatus.CLOSED) {
 
             log.warn(
                     "Account status update rejected because account is closed. accountId={}",
@@ -200,19 +189,17 @@ public class AccountService {
             );
         }
 
-        AccountStatus previousStatus =
-                account.getAccountStatus();
+        // Apply closure rules when closing through the status endpoint.
+        if (request.accountStatus() == AccountStatus.CLOSED) {
+            validateZeroBalanceForClosure(account);
+        }
 
-        account.setAccountStatus(
-                request.accountStatus()
-        );
+        AccountStatus previousStatus = account.getAccountStatus();
 
-        account.setUpdatedAt(
-                LocalDateTime.now()
-        );
+        account.setAccountStatus(request.accountStatus());
+        account.setUpdatedAt(LocalDateTime.now());
 
-        Account updatedAccount =
-                accountRepository.save(account);
+        Account updatedAccount = accountRepository.save(account);
 
         log.info(
                 "Account status updated successfully. accountId={}, previousStatus={}, newStatus={}",
@@ -225,23 +212,14 @@ public class AccountService {
     }
 
     @Transactional
-    public AccountResponse closeAccount(
-            Long accountId
-    ) {
+    public AccountResponse closeAccount(Long accountId) {
 
-        log.info(
-                "Account close requested. accountId={}",
-                accountId
-        );
+        log.info("Account close requested. accountId={}", accountId);
 
-        Account account =
-                accountRepository.findById(accountId)
-                        .orElseThrow(() ->
-                                new AccountNotFoundException(accountId)
-                        );
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
 
-        if (account.getAccountStatus()
-                == AccountStatus.CLOSED) {
+        if (account.getAccountStatus() == AccountStatus.CLOSED) {
 
             log.warn(
                     "Account close rejected because account is already closed. accountId={}",
@@ -254,16 +232,12 @@ public class AccountService {
             );
         }
 
-        account.setAccountStatus(
-                AccountStatus.CLOSED
-        );
+        validateZeroBalanceForClosure(account);
 
-        account.setUpdatedAt(
-                LocalDateTime.now()
-        );
+        account.setAccountStatus(AccountStatus.CLOSED);
+        account.setUpdatedAt(LocalDateTime.now());
 
-        Account updatedAccount =
-                accountRepository.save(account);
+        Account updatedAccount = accountRepository.save(account);
 
         log.info(
                 "Account closed successfully. accountId={}",
@@ -273,6 +247,26 @@ public class AccountService {
         return AccountMapper.toResponse(updatedAccount);
     }
 
+    private void validateZeroBalanceForClosure(Account account) {
+
+        if (account.getBalance() == null) {
+            throw new IllegalStateException("Account balance is missing");
+        }
+
+        if (account.getBalance().compareTo(BigDecimal.ZERO) != 0) {
+
+            log.warn(
+                    "Account closure rejected because balance is not zero. accountId={}",
+                    account.getAccountId()
+            );
+
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_ACCOUNT_STATE,
+                    "Account can be closed only when balance is zero"
+            );
+        }
+    }
+
     public PageResponse<AccountResponse> getAccounts(
             Long customerId,
             String accountType,
@@ -280,8 +274,7 @@ public class AccountService {
             int page,
             int size,
             String sortBy,
-            String sortDir
-    ) {
+            String sortDir) {
 
         log.debug(
                 "Fetching accounts. customerId={}, accountType={}, status={}, page={}, size={}, sortBy={}, sortDir={}",
@@ -319,32 +312,18 @@ public class AccountService {
             );
         }
 
-        Sort sort =
-                sortDir.equalsIgnoreCase("asc")
-                        ? Sort.by(sortBy).ascending()
-                        : Sort.by(sortBy).descending();
+        Sort sort = sortDir.equalsIgnoreCase("asc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
 
-        Pageable pageable =
-                PageRequest.of(
-                        page,
-                        size,
-                        sort
-                );
+        Pageable pageable = PageRequest.of(page, size, sort);
 
-        Page<Account> accountPage =
-                accountRepository.findAll(
-                        AccountSpecifications
-                                .hasCustomerId(customerId)
-                                .and(
-                                        AccountSpecifications
-                                                .hasAccountType(accountType)
-                                )
-                                .and(
-                                        AccountSpecifications
-                                                .hasStatus(status)
-                                ),
-                        pageable
-                );
+        Page<Account> accountPage = accountRepository.findAll(
+                AccountSpecifications.hasCustomerId(customerId)
+                        .and(AccountSpecifications.hasAccountType(accountType))
+                        .and(AccountSpecifications.hasStatus(status)),
+                pageable
+        );
 
         List<AccountResponse> accounts =
                 accountPage.getContent()

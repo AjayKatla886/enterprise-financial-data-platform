@@ -468,4 +468,144 @@ class AccountServiceTest {
         verify(accountRepository, never())
                 .saveAndFlush(any(Account.class));
     }
+    @Test
+    void shouldRejectClosureWithPositiveBalance() {
+        assertClosureRejected(new BigDecimal("100.00"), false);
+    }
+
+    @Test
+    void shouldRejectClosureWithNegativeBalance() {
+        assertClosureRejected(new BigDecimal("-25.00"), false);
+    }
+
+    @Test
+    void shouldRejectStatusClosureWithPositiveBalance() {
+        assertClosureRejected(new BigDecimal("100.00"), true);
+    }
+
+    @Test
+    void shouldRejectStatusClosureWithNegativeBalance() {
+        assertClosureRejected(new BigDecimal("-25.00"), true);
+    }
+
+    @Test
+    void shouldCloseAccountWithScaledZeroBalance() {
+        Account account = buildLifecycleAccount(new BigDecimal("0.00"));
+
+        when(accountRepository.findById(10L))
+                .thenReturn(java.util.Optional.of(account));
+
+        when(accountRepository.save(any(Account.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AccountResponse response = accountService.closeAccount(10L);
+
+        assertEquals("CLOSED", response.accountStatus());
+        assertEquals(AccountStatus.CLOSED, account.getAccountStatus());
+        assertNotNull(response.updatedAt());
+
+        verify(accountRepository).save(account);
+    }
+
+    @Test
+    void shouldCloseThroughStatusUpdateWithZeroBalance() {
+        Account account = buildLifecycleAccount(new BigDecimal("0.00"));
+
+        when(accountRepository.findById(10L))
+                .thenReturn(java.util.Optional.of(account));
+
+        when(accountRepository.save(any(Account.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AccountResponse response = accountService.updateAccountStatus(
+                10L,
+                new AccountStatusRequest(AccountStatus.CLOSED)
+        );
+
+        assertEquals("CLOSED", response.accountStatus());
+        assertEquals(AccountStatus.CLOSED, account.getAccountStatus());
+        assertNotNull(response.updatedAt());
+
+        verify(accountRepository).save(account);
+    }
+
+    @Test
+    void shouldAllowBlockingAccountWithNonzeroBalance() {
+        Account account = buildLifecycleAccount(new BigDecimal("100.00"));
+
+        when(accountRepository.findById(10L))
+                .thenReturn(java.util.Optional.of(account));
+
+        when(accountRepository.save(any(Account.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AccountResponse response = accountService.updateAccountStatus(
+                10L,
+                new AccountStatusRequest(AccountStatus.BLOCKED)
+        );
+
+        assertEquals("BLOCKED", response.accountStatus());
+        assertEquals(new BigDecimal("100.00"), account.getBalance());
+
+        verify(accountRepository).save(account);
+    }
+
+    private void assertClosureRejected(
+            BigDecimal balance,
+            boolean throughStatusUpdate) {
+
+        Account account = buildLifecycleAccount(balance);
+
+        java.time.LocalDateTime originalUpdatedAt =
+                account.getUpdatedAt();
+
+        when(accountRepository.findById(10L))
+                .thenReturn(java.util.Optional.of(account));
+
+        AccountBusinessException exception = assertThrows(
+                AccountBusinessException.class,
+                () -> {
+                    if (throughStatusUpdate) {
+                        accountService.updateAccountStatus(
+                                10L,
+                                new AccountStatusRequest(AccountStatus.CLOSED)
+                        );
+                    } else {
+                        accountService.closeAccount(10L);
+                    }
+                }
+        );
+
+        assertEquals(
+                ErrorCode.INVALID_ACCOUNT_STATE,
+                exception.getErrorCode()
+        );
+
+        assertEquals(
+                "Account can be closed only when balance is zero",
+                exception.getMessage()
+        );
+
+        assertEquals(AccountStatus.ACTIVE, account.getAccountStatus());
+        assertEquals(balance, account.getBalance());
+        assertEquals(originalUpdatedAt, account.getUpdatedAt());
+
+        verify(accountRepository, never()).save(any(Account.class));
+    }
+
+    private Account buildLifecycleAccount(BigDecimal balance) {
+        java.time.LocalDateTime createdAt =
+                java.time.LocalDateTime.of(2026, 9, 1, 10, 0);
+
+        return Account.builder()
+                .accountId(10L)
+                .accountNumber("0000000010")
+                .customerId(3L)
+                .accountType(AccountType.SAVINGS)
+                .balance(balance)
+                .accountStatus(AccountStatus.ACTIVE)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .build();
+    }
 }
