@@ -21,6 +21,13 @@ public enum ErrorCode {
 
     // Downstream Dependencies
     CUSTOMER_SERVICE_UNAVAILABLE("DEP-001"),
+    // Transaction Service
+    TRANSACTION_ACCOUNT_NOT_FOUND("TXN-001"),
+    TRANSACTION_ACCOUNT_NOT_ACTIVE("TXN-002"),
+    TRANSACTION_NOT_FOUND("TXN-003"),
+
+    // Downstream Dependencies — add alongside DEP-001
+    ACCOUNT_SERVICE_UNAVAILABLE("DEP-002"),
 
     // Request Validation
     VALIDATION_ERROR("VAL-001"),
