@@ -1,0 +1,51 @@
+**Day 13 Notes — Transaction Submission & Retrieval**
+
+**Goal:** Record validated transaction requests and retrieve them by reference.
+
+| Area                  | What we implemented                                                               |
+| --------------------- | --------------------------------------------------------------------------------- |
+| Service setup         | `transaction-service` on port **8082**, registered in the parent Maven POM        |
+| Database              | Oracle `TRANSACTIONS` table created through Flyway `V1`                           |
+| Data model            | Transaction entity, repository, types and statuses                                |
+| Validation            | Positive amount, maximum two decimal places, USD only, valid account combinations |
+| Account integration   | Check referenced accounts exist and are `ACTIVE`                                  |
+| Dependency protection | Connection timeout **3 seconds**, read timeout **5 seconds**                      |
+| Error handling        | Shared response format through a global exception handler                         |
+
+**Account rules**
+
+* **Deposit:** target account required; source empty.
+* **Withdrawal:** source account required; target empty.
+* **Transfer:** both accounts required and must differ.
+
+Account IDs are logical references; there are no cross-service database foreign keys.
+
+**Endpoints**
+
+```http
+POST /api/v1/transactions
+GET /api/v1/transactions/reference/{transactionReference}
+```
+
+Valid submissions return **201 Created**, a UUID reference, and **`PENDING`** status. Retrieval returns **200 OK** when found.
+
+**Error responses**
+
+| Scenario                               | HTTP status | Error code |
+| -------------------------------------- | ----------- | ---------- |
+| Request validation fails               | `400`       | `VAL-001`  |
+| Invalid JSON or unsupported enum value | `400`       | `VAL-002`  |
+| Referenced account not found           | `404`       | `TXN-001`  |
+| Account is not ACTIVE                  | `409`       | `TXN-002`  |
+| Transaction not found                  | `404`       | `TXN-003`  |
+| Account-service dependency fails       | `503`       | `DEP-002`  |
+
+**Verification:** Added submission, DTO validation, account-client, and retrieval tests. Maven verification and Postman/Swagger checks completed.
+
+**Swagger:** [Transaction Swagger UI](http://localhost:8082/swagger-ui/index.html)
+
+**Branch:** `feature/day13-transaction-service-setup`
+
+**Current limit:** Transactions are recorded only. Balances remain unchanged, and repeated submissions create separate records.
+
+**Next — Day 14:** Idempotency to prevent duplicate transaction requests during retries.
