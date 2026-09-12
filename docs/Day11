@@ -1,0 +1,438 @@
+Day 11 - Customer KYC Foundation
+
+Enterprise Financial Data Platform | Customer Service | Oracle | Flyway | Spring Boot
+
+1. Day 11 Objective
+
+Day 11 extended Customer Service with a basic Know Your Customer (KYC) module. The purpose is to track a customer's identity-verification state and document metadata without storing actual identity files in Oracle.
+
+Customer must exist before KYC can be created.
+
+Customer must be ACTIVE.
+
+Only one KYC record is allowed per customer in the current design.
+
+New KYC starts in PENDING status.
+
+VERIFIED status records verifiedAt and lastReviewedAt.
+
+Actual document files are intentionally deferred to the future S3 phase.
+
+2. KYC Data Model
+
+CUSTOMERS
+    1
+    |
+    | 1
+    v
+CUSTOMER_KYC
+
+KYC_ID
+CUSTOMER_ID
+KYC_STATUS
+DOCUMENT_TYPE
+DOCUMENT_NUMBER
+VERIFIED_AT
+LAST_REVIEWED_AT
+CREATED_AT
+UPDATED_AT
+
+For Day 11, CUSTOMER_KYC is a one-to-one extension of the customer profile. The table keeps verification metadata only.
+
+3. Flyway Database Migration
+
+Created:
+
+customer-service/src/main/resources/db/migration/ddl/V5__create_customer_kyc.sql
+
+Created CUSTOMER_KYC.
+
+Added foreign key from CUSTOMER_KYC.CUSTOMER_ID to CUSTOMERS.CUSTOMER_ID.
+
+Added unique constraint on CUSTOMER_ID.
+
+Restricted KYC_STATUS to PENDING, VERIFIED, REJECTED, REVIEW_REQUIRED.
+
+Restricted DOCUMENT_TYPE to PASSPORT, DRIVER_LICENSE, STATE_ID, SSN.
+
+Added indexes for KYC status and document type.
+
+Flyway remains the owner of schema changes. Hibernate remains configured with ddl-auto=none.
+
+4. Folder Structure Added
+
+customer-service/
+└── src/main/java/com/financialplatform/customer/
+    ├── controller/
+    │   └── CustomerKycController.java
+    ├── dto/
+    │   ├── CustomerKycRequest.java
+    │   ├── CustomerKycResponse.java
+    │   └── CustomerKycStatusRequest.java
+    ├── entity/
+    │   ├── CustomerKyc.java
+    │   ├── KycStatus.java
+    │   └── DocumentType.java
+    ├── exception/
+    │   ├── CustomerKycNotFoundException.java
+    │   ├── DuplicateCustomerKycException.java
+    │   └── KycCustomerInactiveException.java
+    ├── mapper/
+    │   └── CustomerKycMapper.java
+    ├── repository/
+    │   └── CustomerKycRepository.java
+    └── service/
+        └── CustomerKycService.java
+
+5. What Each Layer Means
+
+Layer
+
+Purpose
+
+Day 11 Example
+
+Controller
+
+Receives HTTP requests and returns HTTP responses
+
+CustomerKycController
+
+DTO
+
+Carries API request/response data
+
+CustomerKycRequest / Response
+
+Service
+
+Contains business rules and workflow
+
+CustomerKycService
+
+Repository
+
+Performs database access using Spring Data JPA
+
+CustomerKycRepository
+
+Entity
+
+Maps Java object to Oracle table
+
+CustomerKyc
+
+Mapper
+
+Converts Entity to API DTO
+
+CustomerKycMapper
+
+Exception
+
+Represents business or lookup failures
+
+CustomerKycNotFoundException
+
+Flyway
+
+Creates/version-controls database schema
+
+V5__create_customer_kyc.sql
+
+Shortcut to remember: Controller receives, DTO carries, Service decides, Repository accesses, Entity maps, Mapper converts, Exception reports, Flyway creates.
+
+6. Entity and Enums
+
+CustomerKyc.java represents the CUSTOMER_KYC Oracle table. The Java fields map to database columns using JPA annotations.
+
+@Entity
+@Table(name = "CUSTOMER_KYC")
+public class CustomerKyc {
+    private Long kycId;
+    private Long customerId;
+    private KycStatus kycStatus;
+    private DocumentType documentType;
+    private String documentNumber;
+    private LocalDateTime verifiedAt;
+    private LocalDateTime lastReviewedAt;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+}
+
+Enums make KYC values type-safe:
+
+KycStatus:
+PENDING
+VERIFIED
+REJECTED
+REVIEW_REQUIRED
+
+DocumentType:
+PASSPORT
+DRIVER_LICENSE
+STATE_ID
+SSN
+
+7. DTOs
+
+CustomerKycRequest is used when creating KYC:
+
+{
+  "documentType": "DRIVER_LICENSE",
+  "documentNumber": "TX12345678"
+}
+
+The client does not send kycId, status, timestamps, or customer lifecycle fields. Those are controlled by the backend.
+
+CustomerKycStatusRequest is used only for status changes:
+
+{
+  "kycStatus": "VERIFIED"
+}
+
+CustomerKycResponse controls the data returned to the API client.
+
+8. Repository
+
+Optional<CustomerKyc> findByCustomerId(Long customerId);
+
+boolean existsByCustomerId(Long customerId);
+
+Spring Data JPA derives queries from these method names. findByCustomerId retrieves a customer's KYC record, while existsByCustomerId supports duplicate prevention.
+
+9. Service Business Logic
+
+Create KYC flow:
+
+Customer ID
+   ↓
+Find customer
+   ↓
+Customer exists?
+   ↓
+Customer is ACTIVE?
+   ↓
+KYC already exists?
+   ↓
+Create KYC with PENDING status
+   ↓
+Save through repository
+   ↓
+Return response DTO
+
+CustomerNotFoundException is thrown if the customer does not exist.
+
+KycCustomerInactiveException is thrown if the customer is INACTIVE.
+
+DuplicateCustomerKycException is thrown if a KYC row already exists.
+
+KYC starts as PENDING.
+
+Status update sets lastReviewedAt and updatedAt.
+
+VERIFIED also sets verifiedAt.
+
+Other statuses clear verifiedAt in the current implementation.
+
+The active-customer check uses the enum directly:
+
+if (customer.getCustomerStatus() != CustomerStatus.ACTIVE) {
+    throw new KycCustomerInactiveException(
+        "KYC can be created only for active customers"
+    );
+}
+
+10. REST APIs
+
+Method
+
+Endpoint
+
+Purpose
+
+POST
+
+/api/v1/customers/{customerId}/kyc
+
+Create KYC
+
+GET
+
+/api/v1/customers/{customerId}/kyc
+
+Get KYC
+
+PATCH
+
+/api/v1/customers/{customerId}/kyc/status
+
+Update KYC status
+
+Swagger annotations were added so these APIs appear under Customer KYC Management in Swagger UI.
+
+11. Standardized Error Handling
+
+Scenario
+
+HTTP
+
+Error Code
+
+Customer does not exist
+
+404
+
+CUS-001
+
+KYC does not exist
+
+404
+
+KYC-001
+
+KYC already exists
+
+409
+
+KYC-002
+
+Customer inactive for KYC
+
+409
+
+KYC-003
+
+Validation failure
+
+400
+
+VAL-001
+
+Invalid path/query parameter type
+
+400
+
+VAL-002
+
+Unexpected server error
+
+500
+
+SYS-001
+
+A Day 11 hardening improvement added MethodArgumentTypeMismatchException handling. An invalid path variable now returns 400 / VAL-002 instead of falling into the generic 500 / SYS-001 handler.
+
+12. Unit Testing
+
+Created CustomerKycServiceTest with these scenarios:
+
+shouldCreateKycForActiveCustomer
+
+shouldRejectKycCreationForInactiveCustomer
+
+shouldRejectDuplicateKycForCustomer
+
+shouldThrowExceptionWhenCustomerDoesNotExist
+
+shouldGetKycByCustomerId
+
+shouldThrowExceptionWhenKycNotFound
+
+shouldUpdateKycStatusToVerified
+
+shouldUpdateKycStatusToRejected
+
+Mockito isolates the service from Oracle. CustomerRepository and CustomerKycRepository are mocked so the tests focus only on business rules.
+
+13. Manual Postman Tests
+
+Test
+
+Expected Result
+
+Create KYC for active customer
+
+201 Created, status PENDING
+
+Get existing KYC
+
+200 OK
+
+Update status to VERIFIED
+
+200 OK, verifiedAt populated
+
+Create duplicate KYC
+
+409, KYC-002
+
+Create KYC for inactive customer
+
+409, KYC-003
+
+Create KYC for missing customer
+
+404, CUS-001
+
+Get missing KYC
+
+404, KYC-001
+
+Missing required field
+
+400, VAL-001
+
+Invalid enum value
+
+400 invalid request
+
+Invalid path variable type
+
+400, VAL-002
+
+14. Example End-to-End Flow
+
+POST /api/v1/customers/5/kyc
+        ↓
+CustomerKycController
+        ↓
+CustomerKycRequest validation
+        ↓
+CustomerKycService
+        ↓
+CustomerRepository checks customer
+        ↓
+CustomerKycRepository checks duplicate
+        ↓
+CustomerKyc entity
+        ↓
+Oracle CUSTOMER_KYC
+        ↓
+CustomerKycMapper
+        ↓
+CustomerKycResponse
+        ↓
+201 Created
+
+15. Verified Example
+
+A manual GET test for customer 5 returned 200 OK with a VERIFIED KYC record using DRIVER_LICENSE. This confirmed controller, service, repository, entity mapping, Oracle persistence, mapper, and response handling were working together.
+
+16. Day 11 Git Workflow
+
+Feature branch: feature/day-11-customer-kyc
+
+Suggested commit: Day 11: add customer KYC management
+
+PR title: Day 11: Add Customer KYC Management
+
+Base branch: develop
+
+17. Interview Explanation
+
+On Day 11, I extended Customer Service with a KYC module. I created a Flyway-managed CUSTOMER_KYC table in Oracle, mapped it with a JPA entity, and used separate DTOs for creation, status updates, and API responses. The service layer enforces business rules such as active-customer validation, one KYC record per customer, initial PENDING status, and verification timestamps. Spring Data JPA handles persistence, custom exceptions integrate with our standardized error contract, and Swagger exposes the KYC APIs for interactive testing. I also added Mockito unit tests and verified the main positive and negative flows in Postman.
+
+18. Day 11 Result
+
+Customer Service now supports a structured KYC lifecycle in addition to customer profile and address history. This prepares the platform for future account-opening rules, compliance workflows, S3 document storage, security/RBAC, notifications, and reporting.
