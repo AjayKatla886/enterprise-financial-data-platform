@@ -8,6 +8,9 @@ public enum ErrorCode {
     DUPLICATE_CUSTOMER("CUS-003"),
     DUPLICATE_ADDRESS("CUS-004"),
     ADDRESS_NOT_FOUND("CUS-005"),
+    KYC_NOT_FOUND("KYC-001"),
+    DUPLICATE_CUSTOMER_KYC("KYC-002"),
+    KYC_CUSTOMER_INACTIVE("KYC-003"),
 
     // Account Service
     ACCOUNT_NOT_FOUND("ACC-001"),
@@ -24,6 +27,8 @@ public enum ErrorCode {
 
     // System
     INTERNAL_SERVER_ERROR("SYS-001");
+
+
 
     private final String code;
 

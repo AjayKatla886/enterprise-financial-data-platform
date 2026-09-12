@@ -12,6 +12,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
@@ -204,5 +205,55 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(response);
+    }
+    @ExceptionHandler(CustomerKycNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleCustomerKycNotFound(
+            CustomerKycNotFoundException ex,
+            HttpServletRequest request) {
+
+        return buildErrorResponse(
+                HttpStatus.NOT_FOUND,
+                ErrorCode.KYC_NOT_FOUND,
+                ex.getMessage(),
+                request
+        );
+    }
+    @ExceptionHandler(DuplicateCustomerKycException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateCustomerKyc(
+            DuplicateCustomerKycException ex,
+            HttpServletRequest request) {
+
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
+                ErrorCode.DUPLICATE_CUSTOMER_KYC,
+                ex.getMessage(),
+                request
+        );
+    }
+    @ExceptionHandler(KycCustomerInactiveException.class)
+    public ResponseEntity<ErrorResponse> handleKycCustomerInactive(
+            KycCustomerInactiveException ex,
+            HttpServletRequest request) {
+
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
+                ErrorCode.KYC_CUSTOMER_INACTIVE,
+                ex.getMessage(),
+                request
+        );
+    }
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException ex,
+            HttpServletRequest request) {
+
+        String message = "Invalid value for parameter: " + ex.getName();
+
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.INVALID_REQUEST,
+                message,
+                request
+        );
     }
 }
