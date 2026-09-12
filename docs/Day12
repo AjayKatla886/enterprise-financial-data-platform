@@ -1,0 +1,58 @@
+## Day 12 Notes — Account Lifecycle & Balance Protection
+
+**Goal:** Prevent account closure when funds or an outstanding negative balance remain.
+
+### Business rules
+
+* Only accounts with **zero balance** can close.
+* Positive and negative balances both prevent closure.
+* Closed accounts cannot reopen or change status.
+* Both closure endpoints enforce the same balance rule.
+* Rejected operations leave status, balance, and timestamp unchanged.
+
+### Implementation
+
+Added `validateZeroBalanceForClosure()` in `AccountService`, called from:
+
+```http
+PATCH /api/v1/accounts/{accountId}/close
+PATCH /api/v1/accounts/{accountId}/status
+```
+
+The status endpoint checks balance when the requested status is `CLOSED`.
+
+```java
+account.getBalance().compareTo(BigDecimal.ZERO) != 0
+```
+
+`compareTo()` treats `0`, `0.00`, and `0.000` as numerically equal.
+
+### Error responses
+
+| Scenario                                     | HTTP status | Error code |
+| -------------------------------------------- | ----------- | ---------- |
+| Close with nonzero balance                   | `409`       | `ACC-003`  |
+| Change a closed account’s status             | `409`       | `ACC-003`  |
+| Close an already closed account              | `409`       | `ACC-004`  |
+| Account not found                            | `404`       | `ACC-001`  |
+| Missing balance due to invalid internal data | `500`       | `SYS-001`  |
+
+Reused `AccountBusinessException` and the existing global handler.
+
+### Tests and documentation
+
+Added tests for:
+
+* Positive and negative balances through both closure endpoints.
+* Successful closure with `0.00`.
+* Blocking a nonzero-balance account without closing it.
+* Missing balance through both closure endpoints.
+* No save or account mutation after rejected closure.
+
+Updated Swagger descriptions for account creation, status updates, and closure.
+
+**Validation:** Maven verification and Postman checks completed.
+
+**Branch:** `feature/day12-account-lifecycle`
+
+**Future work:** Add concurrency protection when implementing transaction balance updates.
