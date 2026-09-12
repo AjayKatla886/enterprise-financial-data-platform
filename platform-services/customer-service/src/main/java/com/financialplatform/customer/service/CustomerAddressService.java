@@ -4,8 +4,8 @@ import com.financialplatform.customer.dto.CustomerAddressRequest;
 import com.financialplatform.customer.dto.CustomerAddressResponse;
 import com.financialplatform.customer.entity.Customer;
 import com.financialplatform.customer.entity.CustomerAddress;
-import com.financialplatform.customer.exception.AddressNotFoundException;
-import com.financialplatform.customer.exception.CustomerNotFoundException;
+import com.financialplatform.customer.exception.CustomerBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import com.financialplatform.customer.mapper.CustomerAddressMapper;
 import com.financialplatform.customer.repository.CustomerAddressRepository;
 import com.financialplatform.customer.repository.CustomerRepository;
@@ -39,7 +39,10 @@ public class CustomerAddressService {
         );
 
         Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+                .orElseThrow(() -> new CustomerBusinessException(
+                        ErrorCode.CUSTOMER_NOT_FOUND,
+                        "Customer not found with ID: " + customerId
+                ));
 
         if (customer.getCustomerStatus() != CustomerStatus.ACTIVE) {
 
@@ -48,7 +51,8 @@ public class CustomerAddressService {
                     customerId
             );
 
-            throw new IllegalArgumentException(
+            throw new CustomerBusinessException(
+                    ErrorCode.CUSTOMER_INACTIVE,
                     "Address cannot be added for an inactive customer"
             );
         }
@@ -68,7 +72,8 @@ public class CustomerAddressService {
                                 request.addressType()
                         );
 
-                        throw new IllegalArgumentException(
+                        throw new CustomerBusinessException(
+                                ErrorCode.DUPLICATE_ADDRESS,
                                 "The same current address already exists for this address type"
                         );
                     }
@@ -163,14 +168,17 @@ public class CustomerAddressService {
 
         CustomerAddress address =
                 customerAddressRepository.findById(addressId)
-                        .orElseThrow(() ->
-                                new AddressNotFoundException(addressId)
-                        );
+                        .orElseThrow(() -> new CustomerBusinessException(
+                                ErrorCode.ADDRESS_NOT_FOUND,
+                                "Address not found with ID: " + addressId
+                        ));
 
         if (!address.getCustomerId().equals(customerId)) {
-            throw new AddressNotFoundException(addressId);
+            throw new CustomerBusinessException(
+                    ErrorCode.ADDRESS_NOT_FOUND,
+                    "Address not found with ID: " + addressId
+            );
         }
-
         return CustomerAddressMapper.toResponse(address);
     }
 
@@ -205,10 +213,14 @@ public class CustomerAddressService {
 
         return value.trim().toUpperCase();
     }
+
     private void validateCustomerExists(Long customerId) {
 
         if (!customerRepository.existsById(customerId)) {
-            throw new CustomerNotFoundException(customerId);
+            throw new CustomerBusinessException(
+                    ErrorCode.CUSTOMER_NOT_FOUND,
+                    "Customer not found with ID: " + customerId
+            );
         }
     }
 }

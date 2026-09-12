@@ -10,6 +10,8 @@ import com.financialplatform.account.mapper.AccountMapper;
 import com.financialplatform.account.repository.AccountRepository;
 import com.financialplatform.account.repository.AccountSpecifications;
 import com.financialplatform.common.response.PageResponse;
+import com.financialplatform.account.exception.AccountBusinessException;
+import com.financialplatform.common.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
 import com.financialplatform.account.client.CustomerClient;
 import lombok.RequiredArgsConstructor;
@@ -66,10 +68,26 @@ public class AccountService {
                     request.customerId(),
                     customer.customerStatus()
             );
-            throw new IllegalArgumentException(
+            throw new AccountBusinessException(
+                    ErrorCode.CUSTOMER_INACTIVE,
                     "Account cannot be created for an inactive customer"
             );
         }
+        // KYC verification
+        if (!customerClient.isCustomerKycVerified(request.customerId())) {
+
+            log.warn(
+                    "Account creation rejected because customer KYC is not verified. customerId={}",
+                    request.customerId()
+            );
+
+            throw new AccountBusinessException(
+                    ErrorCode.CUSTOMER_KYC_NOT_VERIFIED,
+                    "Account cannot be created because customer KYC is not verified. customerId="
+                            + request.customerId()
+            );
+        }
+        // Duplicate account type validation
         if (accountRepository.existsByCustomerIdAndAccountType(
                 request.customerId(),
                 request.accountType())) {
@@ -80,9 +98,9 @@ public class AccountService {
                     request.accountType()
             );
 
-            throw new IllegalArgumentException(
-                    "Customer already has an account of type: "
-                            + request.accountType()
+            throw new AccountBusinessException(
+                    ErrorCode.DUPLICATE_ACCOUNT_TYPE,
+                    "Customer already has an account of type: " + request.accountType()
             );
         }
 
@@ -176,7 +194,8 @@ public class AccountService {
                     accountId
             );
 
-            throw new IllegalArgumentException(
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_ACCOUNT_STATE,
                     "Closed account status cannot be changed"
             );
         }
@@ -229,7 +248,8 @@ public class AccountService {
                     accountId
             );
 
-            throw new IllegalArgumentException(
+            throw new AccountBusinessException(
+                    ErrorCode.ACCOUNT_ALREADY_CLOSED,
                     "Account is already closed"
             );
         }
