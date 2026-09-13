@@ -1,0 +1,221 @@
+# Day 14 — Transaction Idempotency
+
+## Goal
+
+Prevent duplicate financial transactions when a client retries the same request because of:
+
+* Network timeout
+* Slow response
+* Double-click
+* Mobile retry
+* Gateway retry
+* Temporary connection failure
+
+## Problem
+
+Without idempotency, submitting the same request twice could create two transactions:
+
+```text
+Request 1 → Deposit $100 → Transaction 21
+Request 2 → Deposit $100 → Transaction 22
+```
+
+This could result in duplicate money movement.
+
+## Solution
+
+The client sends a unique header:
+
+```text
+Idempotency-Key: deposit-account-21-001
+```
+
+The Transaction Service stores:
+
+```text
+IDEMPOTENCY_KEY
+REQUEST_HASH
+```
+
+The request hash is generated using SHA-256 from the transaction details.
+
+## Request flow
+
+```mermaid
+flowchart TD
+    A["Receive request and key"] --> B{"Key already exists?"}
+    B -- No --> C["Validate accounts"]
+    C --> D["Generate request hash"]
+    D --> E["Save PENDING transaction"]
+    B -- Yes --> F{"Request hash matches?"}
+    F -- Yes --> G["Return existing transaction"]
+    F -- No --> H["Return 409 TXN-004"]
+```
+
+## Database changes
+
+Created Flyway migration:
+
+```text
+V2__add_transaction_idempotency.sql
+```
+
+Added columns:
+
+```sql
+IDEMPOTENCY_KEY VARCHAR2(100)
+REQUEST_HASH VARCHAR2(64)
+```
+
+Added a unique constraint:
+
+```sql
+CONSTRAINT UK_TRANSACTIONS_IDEMPOTENCY_KEY
+UNIQUE (IDEMPOTENCY_KEY)
+```
+
+The database constraint protects against concurrent requests reaching the service at the same time.
+
+## Code changes
+
+### `Transaction.java`
+
+Added:
+
+```java
+private String idempotencyKey;
+private String requestHash;
+```
+
+### `TransactionRepository.java`
+
+Added:
+
+```java
+Optional<Transaction> findByIdempotencyKey(
+        String idempotencyKey
+);
+```
+
+### `TransactionController.java`
+
+Added the required request header:
+
+```java
+@RequestHeader("Idempotency-Key")
+String idempotencyKey
+```
+
+### `TransactionService.java`
+
+Implemented:
+
+* Idempotency-key validation
+* Maximum key length of 100 characters
+* SHA-256 request hashing
+* Existing-transaction lookup
+* Same-request replay handling
+* Different-request conflict detection
+* Database concurrency handling
+* No repeated Account Service call for successful replays
+
+### `GlobalExceptionHandler.java`
+
+Added handling for:
+
+* Missing `Idempotency-Key`
+* Blank key
+* Oversized key
+* Idempotency conflict
+* Validation failures
+
+### `ErrorCode.java`
+
+Added:
+
+```java
+TRANSACTION_IDEMPOTENCY_CONFLICT("TXN-004")
+```
+
+## Behavior
+
+| Scenario                       | Result                                   |
+| ------------------------------ | ---------------------------------------- |
+| Header missing                 | `400`, `VAL-002`                         |
+| Header blank                   | `400`, `VAL-002`                         |
+| Header exceeds 100 characters  | `400`, `VAL-002`                         |
+| New key                        | Creates one `PENDING` transaction        |
+| Same key and same request      | Returns existing transaction             |
+| Same key and different request | `409`, `TXN-004`                         |
+| Concurrent duplicate request   | Unique constraint prevents duplicate row |
+
+## Swagger test
+
+Endpoint:
+
+```text
+POST http://localhost:8082/api/v1/transactions
+```
+
+Header:
+
+```text
+Idempotency-Key: deposit-account-21-001
+```
+
+Body:
+
+```json
+{
+  "transactionType": "DEPOSIT",
+  "sourceAccountId": null,
+  "targetAccountId": 21,
+  "amount": 100.00,
+  "currency": "USD",
+  "description": "Test deposit"
+}
+```
+
+The repeated request returned the same values:
+
+```text
+transactionId: 21
+transactionReference: 572c27e1-ac11-4b41-b407-36f4477034dc
+```
+
+## Oracle verification
+
+```sql
+SELECT
+    TRANSACTION_ID,
+    TRANSACTION_REFERENCE,
+    IDEMPOTENCY_KEY,
+    REQUEST_HASH,
+    AMOUNT,
+    TRANSACTION_STATUS
+FROM TRANSACTIONS
+WHERE IDEMPOTENCY_KEY = 'deposit-account-21-001';
+```
+
+Verified:
+
+* Only one database record was created.
+* The idempotency key was stored.
+* A 64-character SHA-256 hash was stored.
+* The transaction remained `PENDING`.
+
+## Important distinction
+
+Idempotency currently prevents duplicate transaction records. It does not yet:
+
+* Debit balances
+* Credit receiving accounts
+* Reverse failed transfers
+* Publish Kafka events
+* Process external-bank transactions
+
+These will be added in the transaction-processing phase.
+
+## Day 14 outcome
+
+The Transaction Service now safely handles repeated client requests and prevents duplicate financial transaction creation.
