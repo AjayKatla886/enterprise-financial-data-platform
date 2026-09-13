@@ -8,6 +8,8 @@ public enum ErrorCode {
     DUPLICATE_CUSTOMER("CUS-003"),
     DUPLICATE_ADDRESS("CUS-004"),
     ADDRESS_NOT_FOUND("CUS-005"),
+
+    // Customer KYC
     KYC_NOT_FOUND("KYC-001"),
     DUPLICATE_CUSTOMER_KYC("KYC-002"),
     KYC_CUSTOMER_INACTIVE("KYC-003"),
@@ -18,16 +20,18 @@ public enum ErrorCode {
     INVALID_ACCOUNT_STATE("ACC-003"),
     ACCOUNT_ALREADY_CLOSED("ACC-004"),
     CUSTOMER_KYC_NOT_VERIFIED("ACC-005"),
+    INSUFFICIENT_FUNDS("ACC-006"),
+    BALANCE_OPERATION_IDEMPOTENCY_CONFLICT("ACC-007"),
+    BALANCE_OPERATION_NOT_FOUND("ACC-008"),
 
-    // Downstream Dependencies
-    CUSTOMER_SERVICE_UNAVAILABLE("DEP-001"),
     // Transaction Service
     TRANSACTION_ACCOUNT_NOT_FOUND("TXN-001"),
     TRANSACTION_ACCOUNT_NOT_ACTIVE("TXN-002"),
     TRANSACTION_NOT_FOUND("TXN-003"),
     TRANSACTION_IDEMPOTENCY_CONFLICT("TXN-004"),
 
-    // Downstream Dependencies — add alongside DEP-001
+    // Downstream Dependencies
+    CUSTOMER_SERVICE_UNAVAILABLE("DEP-001"),
     ACCOUNT_SERVICE_UNAVAILABLE("DEP-002"),
 
     // Request Validation
@@ -36,8 +40,6 @@ public enum ErrorCode {
 
     // System
     INTERNAL_SERVER_ERROR("SYS-001");
-
-
 
     private final String code;
 

@@ -8,9 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
@@ -19,6 +21,10 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /*
+     * Keep this handler only while AccountNotFoundException is still
+     * used somewhere in the account service.
+     */
     @ExceptionHandler(AccountNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleAccountNotFound(
             AccountNotFoundException ex,
@@ -37,6 +43,30 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(AccountBusinessException.class)
+    public ResponseEntity<ErrorResponse> handleAccountBusinessException(
+            AccountBusinessException ex,
+            HttpServletRequest request) {
+
+        HttpStatus status = mapBusinessErrorStatus(
+                ex.getErrorCode()
+        );
+
+        log.warn(
+                "Account business rule rejected. errorCode={}, status={}, message={}",
+                ex.getErrorCode().getCode(),
+                status.value(),
+                ex.getMessage()
+        );
+
+        return buildErrorResponse(
+                status,
+                ex.getErrorCode(),
+                ex.getMessage(),
+                request
+        );
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationErrors(
             MethodArgumentNotValidException ex,
@@ -48,7 +78,8 @@ public class GlobalExceptionHandler {
                 .map(error ->
                         error.getField()
                                 + ": "
-                                + error.getDefaultMessage())
+                                + error.getDefaultMessage()
+                )
                 .collect(Collectors.joining(", "));
 
         log.warn(
@@ -72,8 +103,11 @@ public class GlobalExceptionHandler {
         String message = ex.getConstraintViolations()
                 .stream()
                 .map(violation -> violation.getMessage())
-                .findFirst()
-                .orElse("Invalid request parameter");
+                .collect(Collectors.joining(", "));
+
+        if (message.isBlank()) {
+            message = "Invalid request parameter";
+        }
 
         log.warn(
                 "Account request parameter validation failed. violationCount={}",
@@ -88,13 +122,49 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidRequestBody(
+            HttpMessageNotReadableException ex,
+            HttpServletRequest request) {
+
+        log.warn(
+                "Invalid account request body. path={}",
+                request.getRequestURI()
+        );
+
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.INVALID_REQUEST,
+                "Invalid request body or unsupported field value",
+                request
+        );
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(
+            MethodArgumentTypeMismatchException ex,
+            HttpServletRequest request) {
+
+        log.warn(
+                "Account request parameter type mismatch. parameter={}",
+                ex.getName()
+        );
+
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.INVALID_REQUEST,
+                "Invalid value for parameter: " + ex.getName(),
+                request
+        );
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(
             IllegalArgumentException ex,
             HttpServletRequest request) {
 
         log.warn(
-                "Account business validation failed. message={}",
+                "Invalid account request. message={}",
                 ex.getMessage()
         );
 
@@ -160,6 +230,31 @@ public class GlobalExceptionHandler {
         );
     }
 
+    private HttpStatus mapBusinessErrorStatus(
+            ErrorCode errorCode) {
+
+        return switch (errorCode) {
+
+            case ACCOUNT_NOT_FOUND,
+                 BALANCE_OPERATION_NOT_FOUND ->
+                    HttpStatus.NOT_FOUND;
+
+            case INVALID_REQUEST,
+                 VALIDATION_ERROR ->
+                    HttpStatus.BAD_REQUEST;
+
+            case DUPLICATE_ACCOUNT_TYPE,
+                 INVALID_ACCOUNT_STATE,
+                 ACCOUNT_ALREADY_CLOSED,
+                 CUSTOMER_KYC_NOT_VERIFIED,
+                 INSUFFICIENT_FUNDS,
+                 BALANCE_OPERATION_IDEMPOTENCY_CONFLICT ->
+                    HttpStatus.CONFLICT;
+
+            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+        };
+    }
+
     private ResponseEntity<ErrorResponse> buildErrorResponse(
             HttpStatus status,
             ErrorCode errorCode,
@@ -177,23 +272,5 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(response);
-    }
-    @ExceptionHandler(AccountBusinessException.class)
-    public ResponseEntity<ErrorResponse> handleAccountBusinessException(
-            AccountBusinessException ex,
-            HttpServletRequest request) {
-
-        log.warn(
-                "Account business rule rejected. errorCode={}, message={}",
-                ex.getErrorCode().getCode(),
-                ex.getMessage()
-        );
-
-        return buildErrorResponse(
-                HttpStatus.CONFLICT,
-                ex.getErrorCode(),
-                ex.getMessage(),
-                request
-        );
     }
 }
