@@ -1,0 +1,202 @@
+Day 15 — Atomic Account Balance Operations
+Objective
+
+Implement safe debit and credit operations inside Account Service while preventing:
+
+Negative balances
+Duplicate balance updates
+Concurrent double spending
+Lost updates
+Unauthorized updates to inactive accounts
+Architecture Decision
+
+Account Service is the sole owner of account balances.
+
+Transaction Service must never update the ACCOUNTS table directly. It will call Account Service through an internal API.
+
+Database Changes
+
+Created Flyway migration:
+
+V3__create_account_balance_operations.sql
+
+Created table:
+
+ACCOUNT_BALANCE_OPERATIONS
+
+This immutable ledger stores:
+
+Operation reference
+Transaction reference
+Account ID
+Operation type
+Amount
+Balance before
+Balance after
+Request hash
+Description
+Creation timestamp
+
+Supported operation types:
+
+DEBIT
+CREDIT
+REVERSAL
+
+REVERSAL is reserved for later compensation logic and cannot be submitted directly yet.
+
+New Error Codes
+ACC-006 — Insufficient funds
+ACC-007 — Balance-operation idempotency conflict
+ACC-008 — Balance operation not found
+Pessimistic Locking
+
+Added a pessimistic write-lock query to AccountRepository:
+
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("""
+        SELECT account
+        FROM Account account
+        WHERE account.accountId = :accountId
+        """)
+Optional<Account> findByIdForUpdate(
+        @Param("accountId") Long accountId
+);
+
+This locks the account row while a balance operation is processed.
+
+Concurrent requests for the same account must wait and are processed one at a time.
+
+Balance Operation Workflow
+Receive request
+    ↓
+Lock account row
+    ↓
+Generate request hash
+    ↓
+Check operation idempotency
+    ↓
+Validate account is ACTIVE
+    ↓
+Validate available balance
+    ↓
+Calculate new balance
+    ↓
+Update account balance
+    ↓
+Insert immutable ledger record
+    ↓
+Commit both changes together
+
+The account update and ledger insertion execute inside one @Transactional method.
+
+If either operation fails, both changes roll back.
+
+Idempotency
+
+Every balance request includes:
+
+Operation-Reference
+
+Example:
+
+day15-account-21-debit-001
+
+Behavior:
+
+Same reference and same request: returns the original operation.
+Same reference with different request data: returns ACC-007.
+The balance is never updated twice for the same operation.
+
+A SHA-256 request hash is generated using:
+
+Account ID
+Transaction reference
+Operation type
+Amount
+Description
+Internal API
+Apply balance operation
+POST /internal/api/v1/accounts/{accountId}/balance-operations
+
+Header:
+
+Operation-Reference: txn-1001-debit
+
+Request:
+
+{
+  "transactionReference": "550e8400-e29b-41d4-a716-446655440000",
+  "operationType": "DEBIT",
+  "amount": 100.00,
+  "description": "Transaction debit"
+}
+Retrieve balance operation
+GET /internal/api/v1/accounts/balance-operations/{operationReference}
+Business Rules
+Debit
+New balance = Current balance - Amount
+
+Debit is rejected when:
+
+Current balance < Amount
+
+Response:
+
+409 Conflict
+ACC-006
+Credit
+New balance = Current balance + Amount
+Account status
+
+Only an ACTIVE account can be debited or credited.
+
+INACTIVE, BLOCKED, and CLOSED accounts return:
+
+409 Conflict
+ACC-003
+Concurrency Test
+
+Starting balance:
+
+400.00
+
+Two concurrent requests attempted to debit:
+
+300.00 each
+
+Result:
+
+Request 1: SUCCESS
+Balance: 400.00guise → →  gant;\ \ yen300. Mull  abat00acle = .Health cyclists100.00
+
+Request BEL 2 आवે:եցնում FAILED cappuccino
+upal409 delicate SheilaConflict
+
+Only one ledger entry was created.
+
+The second request saw bel the updated balance and was rejected for insufficient funds.
+
+Files Added
+entity/BalanceOperation.java
+entity/BalanceOperationType.java
+repository/BalanceOperationRepository.java
+dto/BalanceOperationRequest.java
+dto/BalanceOperationResponse.java
+service/BalanceOperationService.java
+controller/BalanceOperationController.java
+Files Updated
+AccountRepository.java
+GlobalExceptionHandler.java
+ErrorCode.java
+Key Outcome
+
+Day 15 introduced a safe foundation for financial balance processing:
+
+Atomic database transactions
+Pessimistic row locking
+Idempotent requests
+Insufficient-funds protection
+Immutable audit history
+Controlled business errors
+Concurrent debit protection
