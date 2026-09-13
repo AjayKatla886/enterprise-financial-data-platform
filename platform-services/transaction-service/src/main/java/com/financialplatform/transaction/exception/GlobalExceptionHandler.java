@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -26,17 +27,30 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
 
         HttpStatus status = switch (ex.getErrorCode()) {
-            case TRANSACTION_ACCOUNT_NOT_FOUND, TRANSACTION_NOT_FOUND ->
+
+            case TRANSACTION_ACCOUNT_NOT_FOUND,
+                 TRANSACTION_NOT_FOUND ->
                     HttpStatus.NOT_FOUND;
 
-            case TRANSACTION_ACCOUNT_NOT_ACTIVE ->
+            case TRANSACTION_ACCOUNT_NOT_ACTIVE,
+                 TRANSACTION_IDEMPOTENCY_CONFLICT ->
                     HttpStatus.CONFLICT;
 
-            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+            case INVALID_REQUEST,
+                 VALIDATION_ERROR ->
+                    HttpStatus.BAD_REQUEST;
+
+            default ->
+                    HttpStatus.INTERNAL_SERVER_ERROR;
         };
 
         if (status == HttpStatus.INTERNAL_SERVER_ERROR) {
-            log.error("Unmapped transaction business error", ex);
+
+            log.error(
+                    "Unmapped transaction business error. errorCode={}",
+                    ex.getErrorCode(),
+                    ex
+            );
 
             return buildErrorResponse(
                     status,
@@ -65,12 +79,33 @@ public class GlobalExceptionHandler {
             AccountServiceUnavailableException ex,
             HttpServletRequest request) {
 
-        log.error("Account Service dependency failed", ex);
+        log.error(
+                "Account Service dependency failed",
+                ex
+        );
 
         return buildErrorResponse(
                 HttpStatus.SERVICE_UNAVAILABLE,
                 ErrorCode.ACCOUNT_SERVICE_UNAVAILABLE,
                 "Account Service is currently unavailable",
+                request
+        );
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingRequestHeader(
+            MissingRequestHeaderException ex,
+            HttpServletRequest request) {
+
+        log.warn(
+                "Required request header is missing. headerName={}",
+                ex.getHeaderName()
+        );
+
+        return buildErrorResponse(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.INVALID_REQUEST,
+                ex.getHeaderName() + " header is required",
                 request
         );
     }
@@ -85,6 +120,11 @@ public class GlobalExceptionHandler {
                 .stream()
                 .map(error -> error.getDefaultMessage())
                 .collect(Collectors.joining(", "));
+
+        log.warn(
+                "Transaction request validation failed. errorCount={}",
+                ex.getBindingResult().getErrorCount()
+        );
 
         return buildErrorResponse(
                 HttpStatus.BAD_REQUEST,
@@ -156,7 +196,10 @@ public class GlobalExceptionHandler {
             Exception ex,
             HttpServletRequest request) {
 
-        log.error("Unexpected transaction request failure", ex);
+        log.error(
+                "Unexpected transaction request failure",
+                ex
+        );
 
         return buildErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR,
@@ -180,6 +223,8 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
 
-        return ResponseEntity.status(status).body(response);
+        return ResponseEntity
+                .status(status)
+                .body(response);
     }
 }

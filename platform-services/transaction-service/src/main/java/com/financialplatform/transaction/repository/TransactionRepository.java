@@ -11,4 +11,8 @@ public interface TransactionRepository
     Optional<Transaction> findByTransactionReference(
             String transactionReference
     );
+
+    Optional<Transaction> findByIdempotencyKey(
+            String idempotencyKey
+    );
 }

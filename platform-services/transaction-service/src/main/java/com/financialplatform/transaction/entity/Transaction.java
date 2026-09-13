@@ -7,7 +7,19 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "TRANSACTIONS")
+@Table(
+        name = "TRANSACTIONS",
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "UK_TRANSACTIONS_REFERENCE",
+                        columnNames = "TRANSACTION_REFERENCE"
+                ),
+                @UniqueConstraint(
+                        name = "UK_TRANSACTIONS_IDEMPOTENCY_KEY",
+                        columnNames = "IDEMPOTENCY_KEY"
+                )
+        }
+)
 @Getter
 @Setter
 @NoArgsConstructor
@@ -23,10 +35,15 @@ public class Transaction {
     @Column(
             name = "TRANSACTION_REFERENCE",
             nullable = false,
-            length = 36,
-            unique = true
+            length = 36
     )
     private String transactionReference;
+
+    @Column(name = "IDEMPOTENCY_KEY", length = 100)
+    private String idempotencyKey;
+
+    @Column(name = "REQUEST_HASH", length = 64)
+    private String requestHash;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "TRANSACTION_TYPE", nullable = false, length = 20)
