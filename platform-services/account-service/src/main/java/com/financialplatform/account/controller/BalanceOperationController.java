@@ -1,5 +1,7 @@
 package com.financialplatform.account.controller;
 
+import com.financialplatform.account.dto.AccountTransferRequest;
+import com.financialplatform.account.dto.AccountTransferResponse;
 import com.financialplatform.account.dto.BalanceOperationRequest;
 import com.financialplatform.account.dto.BalanceOperationResponse;
 import com.financialplatform.account.entity.BalanceOperation;
@@ -21,7 +23,10 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 @Tag(
         name = "Internal Account Balance Operations",
-        description = "Internal APIs for atomic account debit and credit operations"
+        description = """
+                Internal APIs for atomic debit, credit,
+                and account-to-account transfer operations
+                """
 )
 public class BalanceOperationController {
 
@@ -40,7 +45,9 @@ public class BalanceOperationController {
     applyBalanceOperation(
 
             @PathVariable
-            @Positive(message = "Account ID must be greater than zero")
+            @Positive(
+                    message = "Account ID must be greater than zero"
+            )
             Long accountId,
 
             @Parameter(
@@ -59,11 +66,12 @@ public class BalanceOperationController {
             BalanceOperationRequest request) {
 
         BalanceOperation operation =
-                balanceOperationService.applyBalanceOperation(
-                        accountId,
-                        operationReference,
-                        request
-                );
+                balanceOperationService
+                        .applyBalanceOperation(
+                                accountId,
+                                operationReference,
+                                request
+                        );
 
         BalanceOperationResponse operationResponse =
                 BalanceOperationResponse.from(operation);
@@ -78,8 +86,54 @@ public class BalanceOperationController {
     }
 
     @Operation(
+            summary = "Apply atomic account transfer",
+            description = """
+                    Atomically debits the source account and credits the target
+                    account. Both account updates and both ledger entries commit
+                    together. The Operation-Reference header prevents duplicate
+                    transfer execution.
+                    """
+    )
+    @PostMapping("/transfers")
+    public ResponseEntity<ApiResponse<AccountTransferResponse>>
+    applyTransfer(
+
+            @Parameter(
+                    description = "Unique idempotency reference for the complete transfer",
+                    required = true,
+                    example = "txn-12345-transfer"
+            )
+            @RequestHeader(
+                    value = "Operation-Reference",
+                    required = false
+            )
+            String operationReference,
+
+            @Valid
+            @RequestBody
+            AccountTransferRequest request) {
+
+        AccountTransferResponse transferResponse =
+                balanceOperationService.applyTransfer(
+                        operationReference,
+                        request
+                );
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        "Account transfer completed successfully",
+                        transferResponse
+                )
+        );
+    }
+
+    @Operation(
             summary = "Get balance operation",
-            description = "Retrieves a balance operation using its unique operation reference"
+            description = """
+                    Retrieves a debit or credit ledger operation
+                    using its unique operation reference
+                    """
     )
     @GetMapping("/balance-operations/{operationReference}")
     public ResponseEntity<ApiResponse<BalanceOperationResponse>>
@@ -90,7 +144,9 @@ public class BalanceOperationController {
 
         BalanceOperation operation =
                 balanceOperationService
-                        .getByOperationReference(operationReference);
+                        .getByOperationReference(
+                                operationReference
+                        );
 
         BalanceOperationResponse operationResponse =
                 BalanceOperationResponse.from(operation);

@@ -21,7 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,31 +40,43 @@ class TransactionServiceTest {
     private TransactionService transactionService;
 
     @Test
-    void shouldRecordDepositAsPending() {
+    void shouldProcessDepositAsCompleted() {
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
 
         when(accountClient.getAccountById(21L))
                 .thenReturn(account(21L, "ACTIVE"));
 
-        when(transactionRepository.saveAndFlush(any(Transaction.class)))
-                .thenAnswer(invocation -> {
-                    Transaction transaction = invocation.getArgument(0);
-                    transaction.setTransactionId(1L);
-                    return transaction;
-                });
+        when(transactionRepository.saveAndFlush(
+                any(Transaction.class)
+        )).thenAnswer(invocation -> {
 
-        Transaction saved = transactionService.submitTransaction(
-                IDEMPOTENCY_KEY,
-                request(TransactionType.DEPOSIT, null, 21L)
-        );
+            Transaction transaction =
+                    invocation.getArgument(0);
+
+            transaction.setTransactionId(1L);
+            return transaction;
+        });
+
+        Transaction saved =
+                transactionService.submitTransaction(
+                        IDEMPOTENCY_KEY,
+                        request(
+                                TransactionType.DEPOSIT,
+                                null,
+                                21L
+                        )
+                );
 
         assertEquals(1L, saved.getTransactionId());
+
         assertEquals(
-                TransactionStatus.PENDING,
+                TransactionStatus.COMPLETED,
                 saved.getTransactionStatus()
         );
+
         assertEquals(
                 TransactionType.DEPOSIT,
                 saved.getTransactionType()
@@ -79,7 +91,11 @@ class TransactionServiceTest {
         );
 
         assertEquals("USD", saved.getCurrency());
-        assertEquals("Test transaction", saved.getDescription());
+
+        assertEquals(
+                "Test transaction",
+                saved.getDescription()
+        );
 
         assertEquals(
                 IDEMPOTENCY_KEY,
@@ -87,16 +103,26 @@ class TransactionServiceTest {
         );
 
         assertNotNull(saved.getRequestHash());
-        assertEquals(64, saved.getRequestHash().length());
 
-        assertNotNull(saved.getCreatedAt());
         assertEquals(
-                saved.getCreatedAt(),
-                saved.getUpdatedAt()
+                64,
+                saved.getRequestHash().length()
         );
 
+        assertNotNull(saved.getCreatedAt());
+        assertNotNull(saved.getUpdatedAt());
+
+        assertFalse(
+                saved.getUpdatedAt()
+                        .isBefore(saved.getCreatedAt())
+        );
+
+        assertNull(saved.getFailureReason());
+
         assertDoesNotThrow(() ->
-                UUID.fromString(saved.getTransactionReference())
+                UUID.fromString(
+                        saved.getTransactionReference()
+                )
         );
 
         verify(transactionRepository)
@@ -105,15 +131,92 @@ class TransactionServiceTest {
         verify(accountClient)
                 .getAccountById(21L);
 
-        verify(transactionRepository)
+        verify(accountClient)
+                .applyBalanceOperation(
+                        eq(21L),
+                        endsWith("-credit"),
+                        anyString(),
+                        eq("CREDIT"),
+                        eq(new BigDecimal("100.00")),
+                        contains("Deposit transaction")
+                );
+
+        /*
+         * First save records PENDING.
+         * Second save records COMPLETED.
+         */
+        verify(transactionRepository, times(2))
                 .saveAndFlush(saved);
     }
 
     @Test
-    void shouldValidateBothAccountsForTransfer() {
+    void shouldProcessWithdrawalAsCompleted() {
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
+
+        when(accountClient.getAccountById(21L))
+                .thenReturn(account(21L, "ACTIVE"));
+
+        when(transactionRepository.saveAndFlush(
+                any(Transaction.class)
+        )).thenAnswer(invocation -> {
+
+            Transaction transaction =
+                    invocation.getArgument(0);
+
+            transaction.setTransactionId(2L);
+            return transaction;
+        });
+
+        Transaction saved =
+                transactionService.submitTransaction(
+                        IDEMPOTENCY_KEY,
+                        request(
+                                TransactionType.WITHDRAWAL,
+                                21L,
+                                null
+                        )
+                );
+
+        assertEquals(
+                TransactionStatus.COMPLETED,
+                saved.getTransactionStatus()
+        );
+
+        assertEquals(
+                TransactionType.WITHDRAWAL,
+                saved.getTransactionType()
+        );
+
+        assertEquals(21L, saved.getSourceAccountId());
+        assertNull(saved.getTargetAccountId());
+        assertNull(saved.getFailureReason());
+
+        verify(accountClient)
+                .getAccountById(21L);
+
+        verify(accountClient)
+                .applyBalanceOperation(
+                        eq(21L),
+                        endsWith("-debit"),
+                        anyString(),
+                        eq("DEBIT"),
+                        eq(new BigDecimal("100.00")),
+                        contains("Withdrawal transaction")
+                );
+
+        verify(transactionRepository, times(2))
+                .saveAndFlush(saved);
+    }
+
+    @Test
+    void shouldProcessTransferAsCompleted() {
+
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
 
         when(accountClient.getAccountById(21L))
                 .thenReturn(account(21L, "ACTIVE"));
@@ -121,43 +224,82 @@ class TransactionServiceTest {
         when(accountClient.getAccountById(22L))
                 .thenReturn(account(22L, "ACTIVE"));
 
-        when(transactionRepository.saveAndFlush(any(Transaction.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(transactionRepository.saveAndFlush(
+                any(Transaction.class)
+        )).thenAnswer(invocation -> {
 
-        Transaction saved = transactionService.submitTransaction(
-                IDEMPOTENCY_KEY,
-                request(TransactionType.TRANSFER, 21L, 22L)
-        );
+            Transaction transaction =
+                    invocation.getArgument(0);
 
-        assertEquals(21L, saved.getSourceAccountId());
-        assertEquals(22L, saved.getTargetAccountId());
+            transaction.setTransactionId(3L);
+            return transaction;
+        });
+
+        Transaction saved =
+                transactionService.submitTransaction(
+                        IDEMPOTENCY_KEY,
+                        request(
+                                TransactionType.TRANSFER,
+                                21L,
+                                22L
+                        )
+                );
+
+        assertEquals(3L, saved.getTransactionId());
 
         assertEquals(
-                TransactionStatus.PENDING,
+                TransactionStatus.COMPLETED,
                 saved.getTransactionStatus()
         );
 
         assertEquals(
-                IDEMPOTENCY_KEY,
-                saved.getIdempotencyKey()
+                TransactionType.TRANSFER,
+                saved.getTransactionType()
         );
 
-        assertNotNull(saved.getRequestHash());
+        assertEquals(21L, saved.getSourceAccountId());
+        assertEquals(22L, saved.getTargetAccountId());
+        assertNull(saved.getFailureReason());
 
-        verify(accountClient).getAccountById(21L);
-        verify(accountClient).getAccountById(22L);
+        verify(accountClient)
+                .getAccountById(21L);
 
-        verify(transactionRepository)
+        verify(accountClient)
+                .getAccountById(22L);
+
+        verify(accountClient)
+                .applyTransfer(
+                        endsWith("-transfer"),
+                        anyString(),
+                        eq(21L),
+                        eq(22L),
+                        eq(new BigDecimal("100.00")),
+                        contains("Transfer transaction")
+                );
+
+        verify(accountClient, never())
+                .applyBalanceOperation(
+                        anyLong(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(BigDecimal.class),
+                        anyString()
+                );
+
+        verify(transactionRepository, times(2))
                 .saveAndFlush(saved);
     }
 
     @Test
-    void shouldReturnExistingTransactionForSameKeyAndRequest() {
+    void shouldReturnExistingCompletedTransactionForSameRequest() {
 
         AtomicReference<Transaction> storedTransaction =
                 new AtomicReference<>();
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        ))
                 .thenReturn(Optional.empty())
                 .thenAnswer(invocation ->
                         Optional.of(storedTransaction.get())
@@ -166,16 +308,25 @@ class TransactionServiceTest {
         when(accountClient.getAccountById(21L))
                 .thenReturn(account(21L, "ACTIVE"));
 
-        when(transactionRepository.saveAndFlush(any(Transaction.class)))
-                .thenAnswer(invocation -> {
-                    Transaction transaction = invocation.getArgument(0);
-                    transaction.setTransactionId(1L);
-                    storedTransaction.set(transaction);
-                    return transaction;
-                });
+        when(transactionRepository.saveAndFlush(
+                any(Transaction.class)
+        )).thenAnswer(invocation -> {
+
+            Transaction transaction =
+                    invocation.getArgument(0);
+
+            transaction.setTransactionId(1L);
+            storedTransaction.set(transaction);
+
+            return transaction;
+        });
 
         TransactionRequest request =
-                request(TransactionType.DEPOSIT, null, 21L);
+                request(
+                        TransactionType.DEPOSIT,
+                        null,
+                        21L
+                );
 
         Transaction firstResult =
                 transactionService.submitTransaction(
@@ -192,6 +343,11 @@ class TransactionServiceTest {
         assertSame(firstResult, secondResult);
 
         assertEquals(
+                TransactionStatus.COMPLETED,
+                secondResult.getTransactionStatus()
+        );
+
+        assertEquals(
                 firstResult.getTransactionId(),
                 secondResult.getTransactionId()
         );
@@ -204,16 +360,26 @@ class TransactionServiceTest {
         verify(transactionRepository, times(2))
                 .findByIdempotencyKey(IDEMPOTENCY_KEY);
 
-        /*
-         * The replay must not validate the account again.
-         */
         verify(accountClient, times(1))
                 .getAccountById(21L);
 
+        verify(accountClient, times(1))
+                .applyBalanceOperation(
+                        eq(21L),
+                        endsWith("-credit"),
+                        anyString(),
+                        eq("CREDIT"),
+                        eq(new BigDecimal("100.00")),
+                        contains("Deposit transaction")
+                );
+
         /*
-         * Only one transaction must be inserted.
+         * Both saves belong to the first request:
+         * PENDING and COMPLETED.
+         *
+         * The replay performs no additional save.
          */
-        verify(transactionRepository, times(1))
+        verify(transactionRepository, times(2))
                 .saveAndFlush(any(Transaction.class));
     }
 
@@ -223,7 +389,9 @@ class TransactionServiceTest {
         AtomicReference<Transaction> storedTransaction =
                 new AtomicReference<>();
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        ))
                 .thenReturn(Optional.empty())
                 .thenAnswer(invocation ->
                         Optional.of(storedTransaction.get())
@@ -232,17 +400,26 @@ class TransactionServiceTest {
         when(accountClient.getAccountById(21L))
                 .thenReturn(account(21L, "ACTIVE"));
 
-        when(transactionRepository.saveAndFlush(any(Transaction.class)))
-                .thenAnswer(invocation -> {
-                    Transaction transaction = invocation.getArgument(0);
-                    transaction.setTransactionId(1L);
-                    storedTransaction.set(transaction);
-                    return transaction;
-                });
+        when(transactionRepository.saveAndFlush(
+                any(Transaction.class)
+        )).thenAnswer(invocation -> {
+
+            Transaction transaction =
+                    invocation.getArgument(0);
+
+            transaction.setTransactionId(1L);
+            storedTransaction.set(transaction);
+
+            return transaction;
+        });
 
         transactionService.submitTransaction(
                 IDEMPOTENCY_KEY,
-                request(TransactionType.DEPOSIT, null, 21L)
+                request(
+                        TransactionType.DEPOSIT,
+                        null,
+                        21L
+                )
         );
 
         TransactionRequest differentRequest =
@@ -258,10 +435,11 @@ class TransactionServiceTest {
         TransactionBusinessException exception =
                 assertThrows(
                         TransactionBusinessException.class,
-                        () -> transactionService.submitTransaction(
-                                IDEMPOTENCY_KEY,
-                                differentRequest
-                        )
+                        () -> transactionService
+                                .submitTransaction(
+                                        IDEMPOTENCY_KEY,
+                                        differentRequest
+                                )
                 );
 
         assertEquals(
@@ -269,15 +447,98 @@ class TransactionServiceTest {
                 exception.getErrorCode()
         );
 
-        /*
-         * Account validation and database insert happened only
-         * during the first request.
-         */
         verify(accountClient, times(1))
                 .getAccountById(21L);
 
-        verify(transactionRepository, times(1))
+        verify(accountClient, times(1))
+                .applyBalanceOperation(
+                        eq(21L),
+                        endsWith("-credit"),
+                        anyString(),
+                        eq("CREDIT"),
+                        eq(new BigDecimal("100.00")),
+                        contains("Deposit transaction")
+                );
+
+        verify(transactionRepository, times(2))
                 .saveAndFlush(any(Transaction.class));
+    }
+
+    @Test
+    void shouldMarkTransactionFailedWhenBalanceOperationFails() {
+
+        AtomicReference<Transaction> storedTransaction =
+                new AtomicReference<>();
+
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
+
+        when(accountClient.getAccountById(21L))
+                .thenReturn(account(21L, "ACTIVE"));
+
+        when(transactionRepository.saveAndFlush(
+                any(Transaction.class)
+        )).thenAnswer(invocation -> {
+
+            Transaction transaction =
+                    invocation.getArgument(0);
+
+            transaction.setTransactionId(3L);
+            storedTransaction.set(transaction);
+
+            return transaction;
+        });
+
+        doThrow(new TransactionBusinessException(
+                ErrorCode.INSUFFICIENT_FUNDS,
+                "Insufficient funds for account ID: 21"
+        )).when(accountClient)
+                .applyBalanceOperation(
+                        eq(21L),
+                        anyString(),
+                        anyString(),
+                        eq("DEBIT"),
+                        eq(new BigDecimal("100.00")),
+                        anyString()
+                );
+
+        TransactionBusinessException exception =
+                assertThrows(
+                        TransactionBusinessException.class,
+                        () -> transactionService
+                                .submitTransaction(
+                                        IDEMPOTENCY_KEY,
+                                        request(
+                                                TransactionType.WITHDRAWAL,
+                                                21L,
+                                                null
+                                        )
+                                )
+                );
+
+        assertEquals(
+                ErrorCode.INSUFFICIENT_FUNDS,
+                exception.getErrorCode()
+        );
+
+        Transaction failedTransaction =
+                storedTransaction.get();
+
+        assertNotNull(failedTransaction);
+
+        assertEquals(
+                TransactionStatus.FAILED,
+                failedTransaction.getTransactionStatus()
+        );
+
+        assertEquals(
+                "Insufficient funds for account ID: 21",
+                failedTransaction.getFailureReason()
+        );
+
+        verify(transactionRepository, times(2))
+                .saveAndFlush(failedTransaction);
     }
 
     @Test
@@ -286,14 +547,15 @@ class TransactionServiceTest {
         TransactionBusinessException exception =
                 assertThrows(
                         TransactionBusinessException.class,
-                        () -> transactionService.submitTransaction(
-                                "   ",
-                                request(
-                                        TransactionType.DEPOSIT,
-                                        null,
-                                        21L
+                        () -> transactionService
+                                .submitTransaction(
+                                        "   ",
+                                        request(
+                                                TransactionType.DEPOSIT,
+                                                null,
+                                                21L
+                                        )
                                 )
-                        )
                 );
 
         assertEquals(
@@ -318,14 +580,15 @@ class TransactionServiceTest {
         TransactionBusinessException exception =
                 assertThrows(
                         TransactionBusinessException.class,
-                        () -> transactionService.submitTransaction(
-                                longKey,
-                                request(
-                                        TransactionType.DEPOSIT,
-                                        null,
-                                        21L
+                        () -> transactionService
+                                .submitTransaction(
+                                        longKey,
+                                        request(
+                                                TransactionType.DEPOSIT,
+                                                null,
+                                                21L
+                                        )
                                 )
-                        )
                 );
 
         assertEquals(
@@ -335,7 +598,9 @@ class TransactionServiceTest {
 
         assertTrue(
                 exception.getMessage()
-                        .contains("must not exceed 100 characters")
+                        .contains(
+                                "must not exceed 100 characters"
+                        )
         );
 
         verifyNoInteractions(transactionRepository);
@@ -345,8 +610,9 @@ class TransactionServiceTest {
     @Test
     void shouldRejectNonActiveAccountWithoutSaving() {
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
 
         when(accountClient.getAccountById(21L))
                 .thenReturn(account(21L, "BLOCKED"));
@@ -354,14 +620,15 @@ class TransactionServiceTest {
         TransactionBusinessException exception =
                 assertThrows(
                         TransactionBusinessException.class,
-                        () -> transactionService.submitTransaction(
-                                IDEMPOTENCY_KEY,
-                                request(
-                                        TransactionType.DEPOSIT,
-                                        null,
-                                        21L
+                        () -> transactionService
+                                .submitTransaction(
+                                        IDEMPOTENCY_KEY,
+                                        request(
+                                                TransactionType.DEPOSIT,
+                                                null,
+                                                21L
+                                        )
                                 )
-                        )
                 );
 
         assertEquals(
@@ -374,13 +641,24 @@ class TransactionServiceTest {
 
         verify(transactionRepository, never())
                 .saveAndFlush(any(Transaction.class));
+
+        verify(accountClient, never())
+                .applyBalanceOperation(
+                        anyLong(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(BigDecimal.class),
+                        anyString()
+                );
     }
 
     @Test
     void shouldRejectTransferWhenTargetIsNotActive() {
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
 
         when(accountClient.getAccountById(21L))
                 .thenReturn(account(21L, "ACTIVE"));
@@ -391,14 +669,15 @@ class TransactionServiceTest {
         TransactionBusinessException exception =
                 assertThrows(
                         TransactionBusinessException.class,
-                        () -> transactionService.submitTransaction(
-                                IDEMPOTENCY_KEY,
-                                request(
-                                        TransactionType.TRANSFER,
-                                        21L,
-                                        22L
+                        () -> transactionService
+                                .submitTransaction(
+                                        IDEMPOTENCY_KEY,
+                                        request(
+                                                TransactionType.TRANSFER,
+                                                21L,
+                                                22L
+                                        )
                                 )
-                        )
                 );
 
         assertEquals(
@@ -406,36 +685,53 @@ class TransactionServiceTest {
                 exception.getErrorCode()
         );
 
-        verify(accountClient).getAccountById(21L);
-        verify(accountClient).getAccountById(22L);
+        verify(accountClient)
+                .getAccountById(21L);
+
+        verify(accountClient)
+                .getAccountById(22L);
 
         verify(transactionRepository, never())
                 .saveAndFlush(any(Transaction.class));
+
+        verify(accountClient, never())
+                .applyBalanceOperation(
+                        anyLong(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(BigDecimal.class),
+                        anyString()
+                );
     }
 
     @Test
     void shouldPropagateMissingAccountWithoutSaving() {
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
 
         when(accountClient.getAccountById(999999L))
-                .thenThrow(new TransactionBusinessException(
-                        ErrorCode.TRANSACTION_ACCOUNT_NOT_FOUND,
-                        "Account not found with ID: 999999"
-                ));
+                .thenThrow(
+                        new TransactionBusinessException(
+                                ErrorCode.TRANSACTION_ACCOUNT_NOT_FOUND,
+                                "Account not found with ID: 999999"
+                        )
+                );
 
         TransactionBusinessException exception =
                 assertThrows(
                         TransactionBusinessException.class,
-                        () -> transactionService.submitTransaction(
-                                IDEMPOTENCY_KEY,
-                                request(
-                                        TransactionType.DEPOSIT,
-                                        null,
-                                        999999L
+                        () -> transactionService
+                                .submitTransaction(
+                                        IDEMPOTENCY_KEY,
+                                        request(
+                                                TransactionType.DEPOSIT,
+                                                null,
+                                                999999L
+                                        )
                                 )
-                        )
                 );
 
         assertEquals(
@@ -450,24 +746,28 @@ class TransactionServiceTest {
     @Test
     void shouldPropagateDependencyFailureWithoutSaving() {
 
-        when(transactionRepository.findByIdempotencyKey(IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
+        when(transactionRepository.findByIdempotencyKey(
+                IDEMPOTENCY_KEY
+        )).thenReturn(Optional.empty());
 
         when(accountClient.getAccountById(21L))
-                .thenThrow(new AccountServiceUnavailableException(
-                        "Account Service is currently unavailable"
-                ));
+                .thenThrow(
+                        new AccountServiceUnavailableException(
+                                "Account Service is currently unavailable"
+                        )
+                );
 
         assertThrows(
                 AccountServiceUnavailableException.class,
-                () -> transactionService.submitTransaction(
-                        IDEMPOTENCY_KEY,
-                        request(
-                                TransactionType.DEPOSIT,
-                                null,
-                                21L
+                () -> transactionService
+                        .submitTransaction(
+                                IDEMPOTENCY_KEY,
+                                request(
+                                        TransactionType.DEPOSIT,
+                                        null,
+                                        21L
+                                )
                         )
-                )
         );
 
         verify(transactionRepository, never())
@@ -480,29 +780,34 @@ class TransactionServiceTest {
         String reference =
                 "27b3b07e-2176-4316-bf58-97248cd8fb74";
 
-        Transaction transaction = Transaction.builder()
-                .transactionId(1L)
-                .transactionReference(reference)
-                .transactionType(TransactionType.DEPOSIT)
-                .targetAccountId(21L)
-                .amount(new BigDecimal("100.00"))
-                .currency("USD")
-                .transactionStatus(TransactionStatus.PENDING)
-                .description("Test transaction")
-                .build();
+        Transaction transaction =
+                Transaction.builder()
+                        .transactionId(1L)
+                        .transactionReference(reference)
+                        .transactionType(
+                                TransactionType.DEPOSIT
+                        )
+                        .targetAccountId(21L)
+                        .amount(new BigDecimal("100.00"))
+                        .currency("USD")
+                        .transactionStatus(
+                                TransactionStatus.COMPLETED
+                        )
+                        .description("Test transaction")
+                        .build();
 
-        when(transactionRepository.findByTransactionReference(reference))
+        when(transactionRepository
+                .findByTransactionReference(reference))
                 .thenReturn(Optional.of(transaction));
 
         Transaction result =
-                transactionService.getTransactionByReference(
-                        reference
-                );
+                transactionService
+                        .getTransactionByReference(reference);
 
         assertSame(transaction, result);
 
         assertEquals(
-                TransactionStatus.PENDING,
+                TransactionStatus.COMPLETED,
                 result.getTransactionStatus()
         );
 
@@ -519,14 +824,17 @@ class TransactionServiceTest {
         String reference =
                 "00000000-0000-0000-0000-000000000000";
 
-        when(transactionRepository.findByTransactionReference(reference))
+        when(transactionRepository
+                .findByTransactionReference(reference))
                 .thenReturn(Optional.empty());
 
         TransactionBusinessException exception =
                 assertThrows(
                         TransactionBusinessException.class,
                         () -> transactionService
-                                .getTransactionByReference(reference)
+                                .getTransactionByReference(
+                                        reference
+                                )
                 );
 
         assertEquals(

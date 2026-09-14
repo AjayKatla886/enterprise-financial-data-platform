@@ -26,23 +26,9 @@ public class GlobalExceptionHandler {
             TransactionBusinessException ex,
             HttpServletRequest request) {
 
-        HttpStatus status = switch (ex.getErrorCode()) {
-
-            case TRANSACTION_ACCOUNT_NOT_FOUND,
-                 TRANSACTION_NOT_FOUND ->
-                    HttpStatus.NOT_FOUND;
-
-            case TRANSACTION_ACCOUNT_NOT_ACTIVE,
-                 TRANSACTION_IDEMPOTENCY_CONFLICT ->
-                    HttpStatus.CONFLICT;
-
-            case INVALID_REQUEST,
-                 VALIDATION_ERROR ->
-                    HttpStatus.BAD_REQUEST;
-
-            default ->
-                    HttpStatus.INTERNAL_SERVER_ERROR;
-        };
+        HttpStatus status = mapBusinessErrorStatus(
+                ex.getErrorCode()
+        );
 
         if (status == HttpStatus.INTERNAL_SERVER_ERROR) {
 
@@ -61,8 +47,9 @@ public class GlobalExceptionHandler {
         }
 
         log.warn(
-                "Transaction rejected. errorCode={}, message={}",
+                "Transaction rejected. errorCode={}, status={}, message={}",
                 ex.getErrorCode().getCode(),
+                status.value(),
                 ex.getMessage()
         );
 
@@ -144,6 +131,11 @@ public class GlobalExceptionHandler {
                 .map(violation -> violation.getMessage())
                 .collect(Collectors.joining(", "));
 
+        log.warn(
+                "Transaction parameter validation failed. violationCount={}",
+                ex.getConstraintViolations().size()
+        );
+
         return buildErrorResponse(
                 HttpStatus.BAD_REQUEST,
                 ErrorCode.VALIDATION_ERROR,
@@ -156,6 +148,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInvalidBody(
             HttpMessageNotReadableException ex,
             HttpServletRequest request) {
+
+        log.warn(
+                "Invalid transaction request body. path={}",
+                request.getRequestURI()
+        );
 
         return buildErrorResponse(
                 HttpStatus.BAD_REQUEST,
@@ -170,6 +167,11 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException ex,
             HttpServletRequest request) {
 
+        log.warn(
+                "Transaction parameter type mismatch. parameter={}",
+                ex.getName()
+        );
+
         return buildErrorResponse(
                 HttpStatus.BAD_REQUEST,
                 ErrorCode.INVALID_REQUEST,
@@ -182,6 +184,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleIllegalArgument(
             IllegalArgumentException ex,
             HttpServletRequest request) {
+
+        log.warn(
+                "Invalid transaction request. message={}",
+                ex.getMessage()
+        );
 
         return buildErrorResponse(
                 HttpStatus.BAD_REQUEST,
@@ -207,6 +214,29 @@ public class GlobalExceptionHandler {
                 "An unexpected error occurred",
                 request
         );
+    }
+
+    private HttpStatus mapBusinessErrorStatus(
+            ErrorCode errorCode) {
+
+        return switch (errorCode) {
+
+            case TRANSACTION_ACCOUNT_NOT_FOUND,
+                 TRANSACTION_NOT_FOUND ->
+                    HttpStatus.NOT_FOUND;
+
+            case TRANSACTION_ACCOUNT_NOT_ACTIVE,
+                 TRANSACTION_IDEMPOTENCY_CONFLICT,
+                 INSUFFICIENT_FUNDS ->
+                    HttpStatus.CONFLICT;
+
+            case INVALID_REQUEST,
+                 VALIDATION_ERROR ->
+                    HttpStatus.BAD_REQUEST;
+
+            default ->
+                    HttpStatus.INTERNAL_SERVER_ERROR;
+        };
     }
 
     private ResponseEntity<ErrorResponse> buildErrorResponse(
