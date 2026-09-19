@@ -1,0 +1,163 @@
+# Day 16 — End-to-End Transaction Execution
+
+## Objective
+
+Connect the Transaction Service with the Account Service so deposits, withdrawals, and transfers update real account balances safely.
+
+## What We Implemented
+
+### 1. Deposit Execution
+
+* Transaction Service validates the target account.
+* Account Service applies a `CREDIT`.
+* The account balance increases.
+* A balance ledger record is created.
+* Transaction status changes from `PENDING` to `COMPLETED`.
+
+### 2. Withdrawal Execution
+
+* Transaction Service validates the source account.
+* Account Service applies a `DEBIT`.
+* The account balance decreases.
+* Insufficient-funds requests are rejected.
+* Transaction status becomes `COMPLETED` or `FAILED`.
+
+### 3. Atomic Transfer Execution
+
+For a transfer:
+
+* Source account is debited.
+* Target account is credited.
+* Both operations run inside one Account Service database transaction.
+* Two ledger records are created: `DEBIT` and `CREDIT`.
+* Both operations commit together.
+* If either operation fails, both balance changes roll back.
+
+## Concurrency Protection
+
+Pessimistic database locking was implemented using:
+
+```java
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+```
+
+Accounts are locked in ascending account-ID order. This prevents:
+
+* Concurrent overdrafts
+* Lost balance updates
+* Race conditions
+* Transfer deadlocks
+
+## Idempotency Protection
+
+Deterministic operation references are generated:
+
+```text
+Deposit:    {transactionReference}-credit
+Withdrawal: {transactionReference}-debit
+Transfer:   {transactionReference}-transfer-debit
+            {transactionReference}-transfer-credit
+```
+
+Retrying the same request:
+
+* Returns the existing transaction
+* Does not debit or credit again
+* Does not create duplicate ledger entries
+* Rejects the request if the same key is reused with different data
+
+## Same-Account Protection
+
+Transfers where the source and target account IDs are identical are rejected:
+
+```text
+Source and target accounts must be different
+```
+
+This prevents invalid ledger entries and unnecessary locking.
+
+## Error Handling
+
+The system now handles:
+
+* Account not found
+* Inactive or blocked account
+* Insufficient funds
+* Same source and target account
+* Idempotency conflicts
+* Incomplete transfer ledger state
+* Account Service unavailable
+* Invalid transaction requests
+
+## Testing Completed
+
+Unit tests cover:
+
+* Debit operation
+* Credit operation
+* Insufficient funds
+* Inactive account
+* Missing account
+* Direct reversal rejection
+* Idempotent retry
+* Idempotency conflict
+* Atomic transfer
+* Ascending lock order
+* Inactive transfer target
+* Insufficient transfer balance
+* Incomplete transfer ledger
+* Same-account transfer rejection
+
+Full project verification:
+
+```powershell
+mvn clean verify
+```
+
+Result:
+
+```text
+Platform Common ........ SUCCESS
+Customer Service ....... SUCCESS
+Account Service ........ SUCCESS
+Transaction Service .... SUCCESS
+BUILD SUCCESS
+```
+
+## API Verification
+
+Transaction Swagger UI:
+
+```text
+http://localhost:8082/swagger-ui/index.html
+```
+
+Account Swagger UI:
+
+```text
+http://localhost:8081/swagger-ui/index.html
+```
+
+Verified scenarios:
+
+* Successful deposit
+* Successful withdrawal
+* Successful transfer
+* Idempotent request replay
+* Insufficient-funds rollback
+* Correct account balances
+* Correct Oracle ledger records
+
+## Day 16 Result
+
+The platform now supports real balance movement with:
+
+* Atomic database transactions
+* Concurrency-safe account updates
+* Idempotent retries
+* Double-processing prevention
+* Insufficient-funds protection
+* Complete balance-operation audit records
+* End-to-end Transaction Service and Account Service integration
+
+Day 16 completed successfully.

@@ -3,6 +3,8 @@ package com.financialplatform.transaction.controller;
 import com.financialplatform.common.response.ApiResponse;
 import com.financialplatform.transaction.dto.TransactionRequest;
 import com.financialplatform.transaction.dto.TransactionResponse;
+import com.financialplatform.transaction.entity.Transaction;
+import com.financialplatform.transaction.entity.TransactionStatus;
 import com.financialplatform.transaction.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -18,61 +20,95 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 @Tag(
         name = "Transaction Management",
-        description = "Transaction request submission and retrieval"
+        description = "Transaction submission, execution, and retrieval"
 )
 public class TransactionController {
 
     private final TransactionService transactionService;
 
     @Operation(
-            summary = "Submit transaction request",
-            description = "Validates referenced accounts and records a PENDING "
-                    + "transaction. Reusing the same Idempotency-Key with the "
-                    + "same request returns the existing transaction."
+            summary = "Submit and process transaction",
+            description = """
+                    Submits a transaction using an idempotency key.
+
+                    DEPOSIT and WITHDRAWAL transactions are processed
+                    immediately through Account Service.
+
+                    TRANSFER transactions remain PENDING until the safe
+                    transfer-compensation workflow is available.
+
+                    Reusing the same Idempotency-Key with the same request
+                    returns the existing transaction without moving money twice.
+                    """
     )
     @PostMapping
-    public ResponseEntity<ApiResponse<TransactionResponse>> submitTransaction(
+    public ResponseEntity<ApiResponse<TransactionResponse>>
+    submitTransaction(
+
             @Parameter(
-                    description = "Unique key that prevents duplicate transaction creation",
+                    description = "Unique key that prevents duplicate transaction processing",
                     required = true,
                     example = "deposit-account-21-001"
             )
-            @RequestHeader("Idempotency-Key")
+            @RequestHeader(
+                    value = "Idempotency-Key",
+                    required = false
+            )
             String idempotencyKey,
 
-            @Valid @RequestBody TransactionRequest request) {
+            @Valid
+            @RequestBody
+            TransactionRequest request) {
 
-        TransactionResponse transactionResponse =
-                TransactionResponse.from(
-                        transactionService.submitTransaction(
-                                idempotencyKey,
-                                request
-                        )
+        Transaction transaction =
+                transactionService.submitTransaction(
+                        idempotencyKey,
+                        request
                 );
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new ApiResponse<>(
-                        true,
-                        "Transaction request recorded; processing is pending",
-                        transactionResponse
-                ));
+        TransactionResponse transactionResponse =
+                TransactionResponse.from(transaction);
+
+        String message =
+                getSubmissionMessage(
+                        transaction.getTransactionStatus()
+                );
+
+        HttpStatus responseStatus =
+                getSubmissionStatus(
+                        transaction.getTransactionStatus()
+                );
+
+        return ResponseEntity
+                .status(responseStatus)
+                .body(
+                        new ApiResponse<>(
+                                true,
+                                message,
+                                transactionResponse
+                        )
+                );
     }
 
     @Operation(
             summary = "Get transaction by reference",
-            description = "Retrieves a recorded transaction and its current status"
+            description = "Retrieves a transaction and its current processing status"
     )
     @GetMapping("/reference/{transactionReference}")
     public ResponseEntity<ApiResponse<TransactionResponse>>
     getTransactionByReference(
-            @PathVariable String transactionReference) {
+
+            @PathVariable
+            String transactionReference) {
+
+        Transaction transaction =
+                transactionService
+                        .getTransactionByReference(
+                                transactionReference
+                        );
 
         TransactionResponse transactionResponse =
-                TransactionResponse.from(
-                        transactionService.getTransactionByReference(
-                                transactionReference
-                        )
-                );
+                TransactionResponse.from(transaction);
 
         return ResponseEntity.ok(
                 new ApiResponse<>(
@@ -81,5 +117,35 @@ public class TransactionController {
                         transactionResponse
                 )
         );
+    }
+
+    private String getSubmissionMessage(
+            TransactionStatus status) {
+
+        return switch (status) {
+
+            case COMPLETED ->
+                    "Transaction completed successfully";
+
+            case PENDING ->
+                    "Transaction recorded; processing is pending";
+
+            case FAILED ->
+                    "Transaction processing previously failed";
+        };
+    }
+
+    private HttpStatus getSubmissionStatus(
+            TransactionStatus status) {
+
+        return switch (status) {
+
+            case COMPLETED,
+                 FAILED ->
+                    HttpStatus.OK;
+
+            case PENDING ->
+                    HttpStatus.ACCEPTED;
+        };
     }
 }

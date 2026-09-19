@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ResponseActions;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
@@ -30,9 +31,10 @@ class AccountClientTest {
         // Bind before AccountClient clones and builds the client.
         server = MockRestServiceServer.bindTo(builder).build();
 
+        String baseUrl = "http://account-service.test";
         accountClient = new AccountClient(
                 builder,
-                "http://account-service.test"
+                baseUrl
         );
     }
 
@@ -193,7 +195,7 @@ class AccountClientTest {
         assertNotNull(exception.getCause());
     }
 
-    private org.springframework.test.web.client.ResponseActions expectLookup() {
+    private ResponseActions expectLookup() {
         return server.expect(requestTo(
                         "http://account-service.test/api/v1/accounts/21"
                 ))
