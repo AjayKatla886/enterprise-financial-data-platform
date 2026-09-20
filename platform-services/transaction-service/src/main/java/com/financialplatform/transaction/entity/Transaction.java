@@ -71,6 +71,16 @@ public class Transaction {
     @Column(name = "FAILURE_REASON", length = 500)
     private String failureReason;
 
+    @Column(
+            name = "RECONCILIATION_ATTEMPTS",
+            nullable = false
+    )
+    @Builder.Default
+    private Integer reconciliationAttempts = 0;
+
+    @Column(name = "LAST_RECONCILIATION_AT")
+    private LocalDateTime lastReconciliationAt;
+
     @Column(name = "CREATED_AT", nullable = false)
     private LocalDateTime createdAt;
 

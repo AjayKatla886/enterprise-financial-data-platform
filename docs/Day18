@@ -1,0 +1,246 @@
+# Day 18 — Automatic Transaction Reconciliation
+
+## Objective
+
+Day 18 focused on automatically resolving transactions whose final result was uncertain because of network failures or unavailable downstream services.
+
+The system now determines whether the Account Service completed the financial operation without repeating the debit or credit.
+
+## Why reconciliation is required
+
+A timeout does not always mean that an operation failed.
+
+For example:
+
+1. Transaction Service sends a debit request.
+2. Account Service successfully updates the balance.
+3. The response is lost because of a network problem.
+4. Transaction Service does not know whether the debit succeeded.
+
+Repeating the debit could charge the customer twice. Therefore, the transaction moves to:
+
+```text
+RECONCILIATION_REQUIRED
+```
+
+The reconciliation process checks the Account Service ledger using the original operation reference.
+
+## New transaction status
+
+Added:
+
+```java
+MANUAL_REVIEW
+```
+
+Current lifecycle:
+
+```text
+PENDING
+   ↓
+PROCESSING
+   ├── COMPLETED
+   ├── FAILED
+   └── RECONCILIATION_REQUIRED
+             ├── COMPLETED
+             └── MANUAL_REVIEW
+```
+
+## Database enhancements
+
+Added the following fields to `TRANSACTIONS`:
+
+```text
+RECONCILIATION_ATTEMPTS
+LAST_RECONCILIATION_AT
+```
+
+Purpose:
+
+| Column                    | Purpose                                     |
+| ------------------------- | ------------------------------------------- |
+| `RECONCILIATION_ATTEMPTS` | Tracks automatic resolution attempts        |
+| `LAST_RECONCILIATION_AT`  | Records the most recent attempt             |
+| `UPDATED_AT`              | Supports age-based candidate selection      |
+| `FAILURE_REASON`          | Explains why manual investigation is needed |
+
+The transaction status constraint was updated to support `MANUAL_REVIEW`.
+
+An index was added to improve scheduler searches by status and update time.
+
+## Automatic scheduler
+
+Created:
+
+```text
+TransactionReconciliationScheduler
+```
+
+The scheduler:
+
+* Starts automatically with Transaction Service.
+* Waits for the configured initial delay.
+* Runs periodically.
+* Selects eligible transactions in batches.
+* Processes `PROCESSING` and `RECONCILIATION_REQUIRED`.
+* Ignores recent transactions until the minimum age is reached.
+* Ignores transactions that reached the maximum attempts.
+* Increments the attempt counter.
+* Records the last reconciliation time.
+* Calls the existing safe reconciliation logic.
+
+Scheduling was enabled using:
+
+```java
+@EnableScheduling
+```
+
+## Configurable properties
+
+```properties
+transaction.reconciliation.enabled=true
+transaction.reconciliation.fixed-delay-ms=60000
+transaction.reconciliation.initial-delay-ms=30000
+transaction.reconciliation.minimum-age-seconds=30
+transaction.reconciliation.batch-size=50
+transaction.reconciliation.max-attempts=5
+```
+
+These properties allow behavior changes without modifying Java code.
+
+## Candidate repository query
+
+The repository selects transactions that:
+
+* Have status `PROCESSING` or `RECONCILIATION_REQUIRED`.
+* Are older than the calculated cutoff.
+* Have fewer than the maximum attempts.
+* Are ordered from oldest to newest.
+* Are limited by the configured batch size.
+
+## Reconciliation outcomes
+
+### Confirmed operation
+
+If the expected Account Service balance operation exists:
+
+```text
+RECONCILIATION_REQUIRED → COMPLETED
+```
+
+No additional money movement occurs.
+
+### Still unresolved
+
+If Account Service cannot confirm the operation:
+
+```text
+RECONCILIATION_REQUIRED → RECONCILIATION_REQUIRED
+```
+
+The scheduler retries during a later cycle.
+
+### Attempts exhausted
+
+After five unresolved attempts:
+
+```text
+RECONCILIATION_REQUIRED → MANUAL_REVIEW
+```
+
+Failure reason:
+
+```text
+Automatic reconciliation attempts exhausted;
+manual review is required
+```
+
+The scheduler will no longer retry that transaction.
+
+## Idempotent operation references
+
+Reconciliation uses deterministic operation references:
+
+```text
+Deposit:    {transactionReference}-credit
+Withdrawal: {transactionReference}-debit
+Transfer:   {transactionReference}-transfer
+```
+
+This allows Transaction Service to inspect the Account Service ledger without repeating financial operations.
+
+## Testing completed
+
+### Successful reconciliation
+
+Transaction `41` was moved to `RECONCILIATION_REQUIRED`.
+
+The scheduler found the existing Account Service operation and updated it to:
+
+```text
+COMPLETED
+```
+
+### Manual-review escalation
+
+Transaction `45` was configured with four previous attempts and no confirmed Account Service operation.
+
+The scheduler performed attempt five and updated it to:
+
+```text
+MANUAL_REVIEW
+```
+
+The failure reason and last-reconciliation timestamp were recorded.
+
+## Unit tests
+
+Created scheduler tests covering:
+
+* No eligible candidates
+* Successful reconciliation
+* Unresolved transaction below maximum attempts
+* Escalation at maximum attempts
+* Unexpected exception at maximum attempts
+* Temporary failure before maximum attempts
+* Null attempt count treated as zero
+
+## Verification
+
+Completed:
+
+* Oracle migration verification
+* Automatic scheduler execution
+* Successful reconciliation path
+* Manual-review path
+* Attempt-count tracking
+* Timestamp tracking
+* Unit tests
+* Full Maven reactor build
+
+Result:
+
+```text
+BUILD SUCCESS
+```
+
+## Important lesson
+
+A network timeout is an unknown outcome—not proof of failure.
+
+Financial systems should first determine whether the original operation completed before retrying it. Idempotency, ledger verification, reconciliation and manual-review escalation prevent duplicated money movement and unresolved transactions from being ignored.
+
+## Deferred production enhancements
+
+These are documented for later days:
+
+* Standardize timestamps to UTC using `Instant` and an injected `Clock`.
+* Protect the scheduler when multiple service instances are running.
+* Add reconciliation metrics and alerts.
+* Build an administrator workflow for `MANUAL_REVIEW`.
+* Secure internal Account Service APIs.
+* Add correlation IDs and distributed tracing.
+
+## Day 18 result
+
+Transaction Service can now automatically recover uncertain transaction outcomes, safely confirm completed balance operations, retry unresolved records and escalate persistent failures for manual investigation.
