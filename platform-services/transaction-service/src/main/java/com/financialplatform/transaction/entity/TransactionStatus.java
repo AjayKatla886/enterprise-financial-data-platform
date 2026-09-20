@@ -27,5 +27,10 @@ public enum TransactionStatus {
      * Transaction Service could not confirm whether Account Service
      * completed the balance operation.
      */
-    RECONCILIATION_REQUIRED
+    RECONCILIATION_REQUIRED,
+
+    /**
+     * automatic reconciliation reached its maximum attempts without confirming the outcome.
+     */
+    MANUAL_REVIEW
 }

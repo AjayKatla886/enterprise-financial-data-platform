@@ -134,20 +134,23 @@ public class TransactionController {
 
         return switch (status) {
 
+            case COMPLETED ->
+                    "Transaction completed successfully";
+
             case PENDING ->
                     "Transaction recorded; processing is pending";
 
             case PROCESSING ->
                     "Transaction is currently being processed";
 
-            case COMPLETED ->
-                    "Transaction completed successfully";
-
             case FAILED ->
-                    "Transaction processing previously failed";
+                    "Transaction processing failed";
 
             case RECONCILIATION_REQUIRED ->
-                    "Transaction outcome could not be confirmed; reconciliation is required";
+                    "Transaction outcome requires reconciliation";
+
+            case MANUAL_REVIEW ->
+                    "Transaction requires manual review";
         };
     }
 
@@ -162,7 +165,8 @@ public class TransactionController {
 
             case PENDING,
                  PROCESSING,
-                 RECONCILIATION_REQUIRED ->
+                 RECONCILIATION_REQUIRED,
+                 MANUAL_REVIEW ->
                     HttpStatus.ACCEPTED;
         };
     }
