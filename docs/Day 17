@@ -1,0 +1,19 @@
+## Day 17 Summary
+
+Today, we improved Transaction Service reliability by adding safe transaction-state management and reconciliation.
+
+Transactions now move through:
+
+```text
+PENDING → PROCESSING → COMPLETED
+                     → FAILED
+                     → RECONCILIATION_REQUIRED
+```
+
+Before calling Account Service, the transaction is marked `PROCESSING`. If the account operation succeeds, it becomes `COMPLETED`. Confirmed business failures, such as insufficient funds, become `FAILED`.
+
+If a network timeout occurs, the transaction becomes `RECONCILIATION_REQUIRED` because Account Service may have completed the balance update even though Transaction Service did not receive the response.
+
+We added a reconciliation API that checks Account Service ledger records using the transaction’s unique operation reference. If the ledger operation exists, the transaction becomes `COMPLETED`. If the result cannot be confirmed, it remains under reconciliation.
+
+This prevents duplicate debits, credits, and transfers. We also updated Swagger documentation and added unit tests covering successful processing, failures, idempotency, network uncertainty, and reconciliation.
