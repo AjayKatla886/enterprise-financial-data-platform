@@ -437,4 +437,99 @@ public class AccountClient {
             AccountBalanceOperationResponse creditOperation
     ) {
     }
+    public boolean balanceOperationExists(
+            String operationReference) {
+
+        try {
+            ApiResponse<BalanceOperationLookupResponse> response =
+                    restClient
+                            .get()
+                            .uri(
+                                    "/internal/api/v1/accounts/"
+                                            + "balance-operations/{operationReference}",
+                                    operationReference
+                            )
+                            .retrieve()
+                            .onStatus(
+                                    status -> status.value() == 404,
+                                    (request, responseEntity) -> {
+                                        throw new BalanceOperationNotFoundException();
+                                    }
+                            )
+                            .body(
+                                    new ParameterizedTypeReference<
+                                            ApiResponse<
+                                                    BalanceOperationLookupResponse>>() {
+                                    }
+                            );
+
+            if (response == null
+                    || !response.success()
+                    || response.data() == null) {
+
+                throw new AccountServiceUnavailableException(
+                        "Invalid response received from Account Service"
+                );
+            }
+
+            return operationReference.equals(
+                    response.data().operationReference()
+            );
+
+        } catch (BalanceOperationNotFoundException ex) {
+
+            return false;
+
+        } catch (AccountServiceUnavailableException ex) {
+
+            throw ex;
+
+        } catch (RestClientException ex) {
+
+            throw new AccountServiceUnavailableException(
+                    "Unable to verify balance operation with Account Service",
+                    ex
+            );
+        }
+    }
+
+    public boolean transferOperationExists(
+            String transferOperationReference) {
+
+        boolean debitExists =
+                balanceOperationExists(
+                        transferOperationReference + "-debit"
+                );
+
+        boolean creditExists =
+                balanceOperationExists(
+                        transferOperationReference + "-credit"
+                );
+
+        if (debitExists != creditExists) {
+            throw new AccountServiceUnavailableException(
+                    "Incomplete transfer ledger state detected"
+            );
+        }
+
+        return debitExists;
+    }
+
+    public record BalanceOperationLookupResponse(
+            Long balanceOperationId,
+            String operationReference,
+            String transactionReference,
+            Long accountId,
+            String operationType,
+            BigDecimal amount,
+            BigDecimal balanceBefore,
+            BigDecimal balanceAfter,
+            String description,
+            String createdAt
+    ) {
+    }
+
+    private static class BalanceOperationNotFoundException
+            extends RuntimeException {
+    }
 }
