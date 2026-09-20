@@ -57,6 +57,7 @@ class TransactionServiceTest {
                     invocation.getArgument(0);
 
             transaction.setTransactionId(1L);
+
             return transaction;
         });
 
@@ -103,11 +104,7 @@ class TransactionServiceTest {
         );
 
         assertNotNull(saved.getRequestHash());
-
-        assertEquals(
-                64,
-                saved.getRequestHash().length()
-        );
+        assertEquals(64, saved.getRequestHash().length());
 
         assertNotNull(saved.getCreatedAt());
         assertNotNull(saved.getUpdatedAt());
@@ -142,11 +139,10 @@ class TransactionServiceTest {
                 );
 
         /*
-         * First save records PENDING.
-         * Second save records COMPLETED.
+         * PENDING -> PROCESSING -> COMPLETED
          */
-        verify(transactionRepository, times(2))
-                .saveAndFlush(saved);
+        verify(transactionRepository, times(3))
+                .saveAndFlush(any(Transaction.class));
     }
 
     @Test
@@ -167,6 +163,7 @@ class TransactionServiceTest {
                     invocation.getArgument(0);
 
             transaction.setTransactionId(2L);
+
             return transaction;
         });
 
@@ -207,8 +204,8 @@ class TransactionServiceTest {
                         contains("Withdrawal transaction")
                 );
 
-        verify(transactionRepository, times(2))
-                .saveAndFlush(saved);
+        verify(transactionRepository, times(3))
+                .saveAndFlush(any(Transaction.class));
     }
 
     @Test
@@ -232,6 +229,7 @@ class TransactionServiceTest {
                     invocation.getArgument(0);
 
             transaction.setTransactionId(3L);
+
             return transaction;
         });
 
@@ -287,8 +285,8 @@ class TransactionServiceTest {
                         anyString()
                 );
 
-        verify(transactionRepository, times(2))
-                .saveAndFlush(saved);
+        verify(transactionRepository, times(3))
+                .saveAndFlush(any(Transaction.class));
     }
 
     @Test
@@ -374,12 +372,12 @@ class TransactionServiceTest {
                 );
 
         /*
-         * Both saves belong to the first request:
-         * PENDING and COMPLETED.
+         * The first request performs three saves:
+         * PENDING -> PROCESSING -> COMPLETED.
          *
-         * The replay performs no additional save.
+         * The repeated request performs no additional save.
          */
-        verify(transactionRepository, times(2))
+        verify(transactionRepository, times(3))
                 .saveAndFlush(any(Transaction.class));
     }
 
@@ -460,7 +458,7 @@ class TransactionServiceTest {
                         contains("Deposit transaction")
                 );
 
-        verify(transactionRepository, times(2))
+        verify(transactionRepository, times(3))
                 .saveAndFlush(any(Transaction.class));
     }
 
@@ -490,10 +488,12 @@ class TransactionServiceTest {
             return transaction;
         });
 
-        doThrow(new TransactionBusinessException(
-                ErrorCode.INSUFFICIENT_FUNDS,
-                "Insufficient funds for account ID: 21"
-        )).when(accountClient)
+        doThrow(
+                new TransactionBusinessException(
+                        ErrorCode.INSUFFICIENT_FUNDS,
+                        "Insufficient funds for account ID: 21"
+                )
+        ).when(accountClient)
                 .applyBalanceOperation(
                         eq(21L),
                         anyString(),
@@ -537,7 +537,10 @@ class TransactionServiceTest {
                 failedTransaction.getFailureReason()
         );
 
-        verify(transactionRepository, times(2))
+        /*
+         * PENDING -> PROCESSING -> FAILED
+         */
+        verify(transactionRepository, times(3))
                 .saveAndFlush(failedTransaction);
     }
 
@@ -695,11 +698,11 @@ class TransactionServiceTest {
                 .saveAndFlush(any(Transaction.class));
 
         verify(accountClient, never())
-                .applyBalanceOperation(
+                .applyTransfer(
+                        anyString(),
+                        anyString(),
                         anyLong(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
+                        anyLong(),
                         any(BigDecimal.class),
                         anyString()
                 );
@@ -744,7 +747,7 @@ class TransactionServiceTest {
     }
 
     @Test
-    void shouldPropagateDependencyFailureWithoutSaving() {
+    void shouldPropagateDependencyFailureDuringValidationWithoutSaving() {
 
         when(transactionRepository.findByIdempotencyKey(
                 IDEMPOTENCY_KEY
@@ -772,6 +775,16 @@ class TransactionServiceTest {
 
         verify(transactionRepository, never())
                 .saveAndFlush(any(Transaction.class));
+
+        verify(accountClient, never())
+                .applyBalanceOperation(
+                        anyLong(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(BigDecimal.class),
+                        anyString()
+                );
     }
 
     @Test
@@ -878,5 +891,293 @@ class TransactionServiceTest {
                 null,
                 null
         );
+    }
+    @Test
+    void shouldMarkDepositCompletedWhenReconciliationFindsLedgerOperation() {
+
+        Transaction transaction =
+                transaction(
+                        TransactionStatus.RECONCILIATION_REQUIRED,
+                        TransactionType.DEPOSIT
+                );
+
+        when(transactionRepository.findByTransactionReference(
+                transaction.getTransactionReference()
+        )).thenReturn(Optional.of(transaction));
+
+        when(accountClient.balanceOperationExists(
+                transaction.getTransactionReference() + "-credit"
+        )).thenReturn(true);
+
+        when(transactionRepository.saveAndFlush(transaction))
+                .thenReturn(transaction);
+
+        Transaction result =
+                transactionService.reconcileTransaction(
+                        transaction.getTransactionReference()
+                );
+
+        assertEquals(
+                TransactionStatus.COMPLETED,
+                result.getTransactionStatus()
+        );
+
+        assertNull(result.getFailureReason());
+
+        verify(accountClient).balanceOperationExists(
+                transaction.getTransactionReference() + "-credit"
+        );
+
+        verify(transactionRepository)
+                .saveAndFlush(transaction);
+    }
+
+    @Test
+    void shouldKeepTransactionInReconciliationWhenLedgerOperationIsMissing() {
+
+        Transaction transaction =
+                transaction(
+                        TransactionStatus.RECONCILIATION_REQUIRED,
+                        TransactionType.WITHDRAWAL
+                );
+
+        when(transactionRepository.findByTransactionReference(
+                transaction.getTransactionReference()
+        )).thenReturn(Optional.of(transaction));
+
+        when(accountClient.balanceOperationExists(
+                transaction.getTransactionReference() + "-debit"
+        )).thenReturn(false);
+
+        when(transactionRepository.saveAndFlush(transaction))
+                .thenReturn(transaction);
+
+        Transaction result =
+                transactionService.reconcileTransaction(
+                        transaction.getTransactionReference()
+                );
+
+        assertEquals(
+                TransactionStatus.RECONCILIATION_REQUIRED,
+                result.getTransactionStatus()
+        );
+
+        assertNotNull(result.getFailureReason());
+
+        assertTrue(
+                result.getFailureReason()
+                        .contains("manual reconciliation")
+        );
+
+        verify(transactionRepository)
+                .saveAndFlush(transaction);
+    }
+
+    @Test
+    void shouldKeepTransactionInReconciliationWhenAccountServiceIsUnavailable() {
+
+        Transaction transaction =
+                transaction(
+                        TransactionStatus.RECONCILIATION_REQUIRED,
+                        TransactionType.DEPOSIT
+                );
+
+        when(transactionRepository.findByTransactionReference(
+                transaction.getTransactionReference()
+        )).thenReturn(Optional.of(transaction));
+
+        when(accountClient.balanceOperationExists(
+                transaction.getTransactionReference() + "-credit"
+        )).thenThrow(
+                new AccountServiceUnavailableException(
+                        "Account Service is currently unavailable"
+                )
+        );
+
+        when(transactionRepository.saveAndFlush(transaction))
+                .thenReturn(transaction);
+
+        Transaction result =
+                transactionService.reconcileTransaction(
+                        transaction.getTransactionReference()
+                );
+
+        assertEquals(
+                TransactionStatus.RECONCILIATION_REQUIRED,
+                result.getTransactionStatus()
+        );
+
+        assertEquals(
+                "Account Service is currently unavailable",
+                result.getFailureReason()
+        );
+
+        verify(transactionRepository)
+                .saveAndFlush(transaction);
+    }
+
+    @Test
+    void shouldReconcileTransferWhenBothLedgerOperationsExist() {
+
+        Transaction transaction =
+                transaction(
+                        TransactionStatus.RECONCILIATION_REQUIRED,
+                        TransactionType.TRANSFER
+                );
+
+        when(transactionRepository.findByTransactionReference(
+                transaction.getTransactionReference()
+        )).thenReturn(Optional.of(transaction));
+
+        when(accountClient.transferOperationExists(
+                transaction.getTransactionReference() + "-transfer"
+        )).thenReturn(true);
+
+        when(transactionRepository.saveAndFlush(transaction))
+                .thenReturn(transaction);
+
+        Transaction result =
+                transactionService.reconcileTransaction(
+                        transaction.getTransactionReference()
+                );
+
+        assertEquals(
+                TransactionStatus.COMPLETED,
+                result.getTransactionStatus()
+        );
+
+        verify(accountClient).transferOperationExists(
+                transaction.getTransactionReference() + "-transfer"
+        );
+
+        verify(transactionRepository)
+                .saveAndFlush(transaction);
+    }
+
+    @Test
+    void shouldReturnCompletedTransactionWithoutCallingAccountService() {
+
+        Transaction transaction =
+                transaction(
+                        TransactionStatus.COMPLETED,
+                        TransactionType.DEPOSIT
+                );
+
+        when(transactionRepository.findByTransactionReference(
+                transaction.getTransactionReference()
+        )).thenReturn(Optional.of(transaction));
+
+        Transaction result =
+                transactionService.reconcileTransaction(
+                        transaction.getTransactionReference()
+                );
+
+        assertSame(transaction, result);
+
+        verifyNoInteractions(accountClient);
+
+        verify(transactionRepository, never())
+                .saveAndFlush(any(Transaction.class));
+    }
+
+    @Test
+    void shouldReturnFailedTransactionWithoutCallingAccountService() {
+
+        Transaction transaction =
+                transaction(
+                        TransactionStatus.FAILED,
+                        TransactionType.WITHDRAWAL
+                );
+
+        when(transactionRepository.findByTransactionReference(
+                transaction.getTransactionReference()
+        )).thenReturn(Optional.of(transaction));
+
+        Transaction result =
+                transactionService.reconcileTransaction(
+                        transaction.getTransactionReference()
+                );
+
+        assertSame(transaction, result);
+
+        verifyNoInteractions(accountClient);
+
+        verify(transactionRepository, never())
+                .saveAndFlush(any(Transaction.class));
+    }
+
+    @Test
+    void shouldRejectPendingTransactionReconciliation() {
+
+        Transaction transaction =
+                transaction(
+                        TransactionStatus.PENDING,
+                        TransactionType.DEPOSIT
+                );
+
+        when(transactionRepository.findByTransactionReference(
+                transaction.getTransactionReference()
+        )).thenReturn(Optional.of(transaction));
+
+        TransactionBusinessException exception =
+                assertThrows(
+                        TransactionBusinessException.class,
+                        () -> transactionService
+                                .reconcileTransaction(
+                                        transaction.getTransactionReference()
+                                )
+                );
+
+        assertEquals(
+                ErrorCode.INVALID_REQUEST,
+                exception.getErrorCode()
+        );
+
+        assertEquals(
+                "A PENDING transaction cannot be reconciled",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(accountClient);
+
+        verify(transactionRepository, never())
+                .saveAndFlush(any(Transaction.class));
+    }
+
+    private Transaction transaction(
+            TransactionStatus status,
+            TransactionType type) {
+
+        String reference =
+                "27b3b07e-2176-4316-bf58-97248cd8fb74";
+
+        return Transaction.builder()
+                .transactionId(10L)
+                .transactionReference(reference)
+                .idempotencyKey("reconciliation-test-001")
+                .requestHash("a".repeat(64))
+                .transactionType(type)
+                .sourceAccountId(
+                        type == TransactionType.DEPOSIT
+                                ? null
+                                : 21L
+                )
+                .targetAccountId(
+                        type == TransactionType.WITHDRAWAL
+                                ? null
+                                : 22L
+                )
+                .amount(new BigDecimal("100.00"))
+                .currency("USD")
+                .transactionStatus(status)
+                .description("Reconciliation test")
+                .failureReason(
+                        status == TransactionStatus.RECONCILIATION_REQUIRED
+                                ? "Account Service response was uncertain"
+                                : null
+                )
+                .createdAt(java.time.LocalDateTime.now())
+                .updatedAt(java.time.LocalDateTime.now())
+                .build();
     }
 }
