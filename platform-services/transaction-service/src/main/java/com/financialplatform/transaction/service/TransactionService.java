@@ -5,12 +5,17 @@ import com.financialplatform.transaction.client.AccountClient;
 import com.financialplatform.transaction.dto.TransactionRequest;
 import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
+import com.financialplatform.transaction.entity.TransactionType;
 import com.financialplatform.transaction.exception.AccountServiceUnavailableException;
 import com.financialplatform.transaction.exception.TransactionBusinessException;
 import com.financialplatform.transaction.repository.TransactionRepository;
+import com.financialplatform.transaction.specification.TransactionSpecification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -19,7 +24,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -30,8 +37,164 @@ public class TransactionService {
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 100;
     private static final int MAX_FAILURE_REASON_LENGTH = 500;
 
+    private static final Set<String> ALLOWED_SORT_FIELDS =
+            Set.of(
+                    "transactionId",
+                    "transactionReference",
+                    "transactionType",
+                    "transactionStatus",
+                    "amount",
+                    "createdAt",
+                    "updatedAt"
+            );
+
     private final TransactionRepository transactionRepository;
     private final AccountClient accountClient;
+
+    public Page<Transaction> getTransactions(
+            Long accountId,
+            Long customerId,
+            TransactionType transactionType,
+            TransactionStatus transactionStatus,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
+
+        validateTransactionSearch(
+                accountId,
+                customerId,
+                fromDate,
+                toDate,
+                sortBy,
+                sortDir
+        );
+
+        Sort.Direction direction =
+                "desc".equalsIgnoreCase(sortDir)
+                        ? Sort.Direction.DESC
+                        : Sort.Direction.ASC;
+
+        PageRequest pageRequest =
+                PageRequest.of(
+                        page,
+                        size,
+                        Sort.by(direction, sortBy)
+                );
+
+        List<Long> accountIds = List.of();
+
+        if (accountId != null) {
+
+            /*
+             * Confirms that the requested account exists.
+             */
+            accountClient.getAccountById(accountId);
+
+            accountIds = List.of(accountId);
+        }
+
+        if (customerId != null) {
+
+            /*
+             * Transaction Service does not own the relationship
+             * between customers and accounts.
+             *
+             * Account Service is called to retrieve all accounts
+             * belonging to the requested customer.
+             */
+            accountIds =
+                    accountClient
+                            .getAccountsByCustomerId(customerId)
+                            .stream()
+                            .map(
+                                    AccountClient
+                                            .AccountLookupResponse::accountId
+                            )
+                            .distinct()
+                            .toList();
+
+            /*
+             * An existing customer may have no accounts.
+             *
+             * Returning an empty page prevents an empty account-ID
+             * collection from being interpreted as no account filter.
+             */
+            if (accountIds.isEmpty()) {
+                return Page.empty(pageRequest);
+            }
+        }
+
+        return transactionRepository.findAll(
+                TransactionSpecification.withFilters(
+                        accountIds,
+                        transactionType,
+                        transactionStatus,
+                        fromDate,
+                        toDate
+                ),
+                pageRequest
+        );
+    }
+
+    private void validateTransactionSearch(
+            Long accountId,
+            Long customerId,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            String sortBy,
+            String sortDir) {
+
+        if (accountId != null && customerId != null) {
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "accountId and customerId cannot be used together"
+            );
+        }
+
+        if (accountId != null && accountId <= 0) {
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Account ID must be greater than zero"
+            );
+        }
+
+        if (customerId != null && customerId <= 0) {
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Customer ID must be greater than zero"
+            );
+        }
+
+        if (fromDate != null
+                && toDate != null
+                && fromDate.isAfter(toDate)) {
+
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "fromDate must be before or equal to toDate"
+            );
+        }
+
+        if (!ALLOWED_SORT_FIELDS.contains(sortBy)) {
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Unsupported transaction sort field: "
+                            + sortBy
+            );
+        }
+
+        if (!"asc".equalsIgnoreCase(sortDir)
+                && !"desc".equalsIgnoreCase(sortDir)) {
+
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "sortDir must be either asc or desc"
+            );
+        }
+    }
 
     public Transaction submitTransaction(
             String idempotencyKey,
@@ -327,7 +490,7 @@ public class TransactionService {
         } catch (AccountServiceUnavailableException ex) {
 
             /*
-             * The Account Service might have committed the balance
+             * Account Service might have committed the balance
              * operation before the HTTP response was lost.
              *
              * The result is uncertain, so the transaction must not

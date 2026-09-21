@@ -14,8 +14,16 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -859,6 +867,318 @@ class TransactionServiceTest {
                 .findByTransactionReference(reference);
 
         verifyNoMoreInteractions(transactionRepository);
+        verifyNoInteractions(accountClient);
+    }
+
+    // ============================================================
+    // Day 19 - Transaction History
+    // ============================================================
+
+    @Test
+    void shouldRetrieveAllTransactionHistoryWithPaginationAndSorting() {
+
+        LocalDateTime createdAt =
+                LocalDateTime.of(2026, 9, 20, 10, 30);
+
+        Transaction transaction = Transaction.builder()
+                .transactionId(45L)
+                .transactionReference(UUID.randomUUID().toString())
+                .transactionType(TransactionType.DEPOSIT)
+                .targetAccountId(21L)
+                .amount(new BigDecimal("100.00"))
+                .currency("USD")
+                .transactionStatus(TransactionStatus.COMPLETED)
+                .description("Transaction history test")
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .build();
+
+        Pageable expectedPageable = PageRequest.of(
+                0,
+                20,
+                Sort.by(Sort.Direction.DESC, "createdAt")
+        );
+
+        Page<Transaction> repositoryPage = new PageImpl<>(
+                List.of(transaction),
+                expectedPageable,
+                1
+        );
+
+        when(transactionRepository.findAll(
+                any(Specification.class),
+                eq(expectedPageable)
+        )).thenReturn(repositoryPage);
+
+        Page<Transaction> result = transactionService.getTransactions(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                20,
+                "createdAt",
+                "desc"
+        );
+
+        assertEquals(1, result.getTotalElements());
+        assertSame(transaction, result.getContent().getFirst());
+
+        verify(transactionRepository).findAll(
+                any(Specification.class),
+                eq(expectedPageable)
+        );
+        verifyNoInteractions(accountClient);
+    }
+
+    @Test
+    void shouldRetrieveTransactionHistoryForAccount() {
+
+        when(accountClient.getAccountById(21L))
+                .thenReturn(account(21L, "ACTIVE"));
+
+        Pageable expectedPageable = PageRequest.of(
+                0,
+                10,
+                Sort.by(Sort.Direction.ASC, "transactionId")
+        );
+
+        when(transactionRepository.findAll(
+                any(Specification.class),
+                eq(expectedPageable)
+        )).thenReturn(Page.empty(expectedPageable));
+
+        Page<Transaction> result = transactionService.getTransactions(
+                21L,
+                null,
+                TransactionType.TRANSFER,
+                TransactionStatus.COMPLETED,
+                null,
+                null,
+                0,
+                10,
+                "transactionId",
+                "asc"
+        );
+
+        assertTrue(result.isEmpty());
+        verify(accountClient).getAccountById(21L);
+        verify(transactionRepository).findAll(
+                any(Specification.class),
+                eq(expectedPageable)
+        );
+    }
+
+    @Test
+    void shouldRetrieveTransactionHistoryForCustomerAccounts() {
+
+        when(accountClient.getAccountsByCustomerId(3L))
+                .thenReturn(List.of(
+                        account(21L, "ACTIVE"),
+                        account(22L, "ACTIVE")
+                ));
+
+        Pageable expectedPageable = PageRequest.of(
+                0,
+                20,
+                Sort.by(Sort.Direction.DESC, "createdAt")
+        );
+
+        when(transactionRepository.findAll(
+                any(Specification.class),
+                eq(expectedPageable)
+        )).thenReturn(Page.empty(expectedPageable));
+
+        Page<Transaction> result = transactionService.getTransactions(
+                null,
+                3L,
+                null,
+                null,
+                null,
+                null,
+                0,
+                20,
+                "createdAt",
+                "desc"
+        );
+
+        assertTrue(result.isEmpty());
+        verify(accountClient).getAccountsByCustomerId(3L);
+        verify(transactionRepository).findAll(
+                any(Specification.class),
+                eq(expectedPageable)
+        );
+    }
+
+    @Test
+    void shouldReturnEmptyPageWhenCustomerHasNoAccounts() {
+
+        when(accountClient.getAccountsByCustomerId(3L))
+                .thenReturn(List.of());
+
+        Page<Transaction> result = transactionService.getTransactions(
+                null,
+                3L,
+                null,
+                null,
+                null,
+                null,
+                0,
+                20,
+                "createdAt",
+                "desc"
+        );
+
+        assertTrue(result.isEmpty());
+        assertEquals(0, result.getTotalElements());
+        verify(accountClient).getAccountsByCustomerId(3L);
+        verify(transactionRepository, never()).findAll(
+                any(Specification.class),
+                any(Pageable.class)
+        );
+    }
+
+    @Test
+    void shouldApplyTransactionTypeStatusAndDateFilters() {
+
+        LocalDateTime fromDate =
+                LocalDateTime.of(2026, 9, 1, 0, 0);
+
+        LocalDateTime toDate =
+                LocalDateTime.of(2026, 9, 30, 23, 59);
+
+        when(transactionRepository.findAll(
+                any(Specification.class),
+                any(Pageable.class)
+        )).thenReturn(Page.empty());
+
+        Page<Transaction> result = transactionService.getTransactions(
+                null,
+                null,
+                TransactionType.WITHDRAWAL,
+                TransactionStatus.FAILED,
+                fromDate,
+                toDate,
+                0,
+                20,
+                "amount",
+                "desc"
+        );
+
+        assertTrue(result.isEmpty());
+        verify(transactionRepository).findAll(
+                any(Specification.class),
+                argThat((Pageable pageable) ->
+                        pageable.getSort().getOrderFor("amount") != null
+                                && pageable.getSort()
+                                .getOrderFor("amount")
+                                .getDirection()
+                                == Sort.Direction.DESC
+                )
+        );
+    }
+
+    @Test
+    void shouldRejectHistoryWhenFromDateIsAfterToDate() {
+
+        LocalDateTime fromDate =
+                LocalDateTime.of(2026, 9, 30, 0, 0);
+
+        LocalDateTime toDate =
+                LocalDateTime.of(2026, 9, 1, 0, 0);
+
+        TransactionBusinessException exception = assertThrows(
+                TransactionBusinessException.class,
+                () -> transactionService.getTransactions(
+                        null,
+                        null,
+                        null,
+                        null,
+                        fromDate,
+                        toDate,
+                        0,
+                        20,
+                        "createdAt",
+                        "desc"
+                )
+        );
+
+        assertEquals(ErrorCode.INVALID_REQUEST, exception.getErrorCode());
+        verifyNoInteractions(transactionRepository);
+        verifyNoInteractions(accountClient);
+    }
+
+    @Test
+    void shouldRejectUnsupportedHistorySortField() {
+
+        TransactionBusinessException exception = assertThrows(
+                TransactionBusinessException.class,
+                () -> transactionService.getTransactions(
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        20,
+                        "customerId",
+                        "desc"
+                )
+        );
+
+        assertEquals(ErrorCode.INVALID_REQUEST, exception.getErrorCode());
+        verifyNoInteractions(transactionRepository);
+        verifyNoInteractions(accountClient);
+    }
+
+    @Test
+    void shouldRejectUnsupportedHistorySortDirection() {
+
+        TransactionBusinessException exception = assertThrows(
+                TransactionBusinessException.class,
+                () -> transactionService.getTransactions(
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        20,
+                        "createdAt",
+                        "sideways"
+                )
+        );
+
+        assertEquals(ErrorCode.INVALID_REQUEST, exception.getErrorCode());
+        verifyNoInteractions(transactionRepository);
+        verifyNoInteractions(accountClient);
+    }
+
+    @Test
+    void shouldRejectAccountAndCustomerFiltersTogether() {
+
+        TransactionBusinessException exception = assertThrows(
+                TransactionBusinessException.class,
+                () -> transactionService.getTransactions(
+                        21L,
+                        3L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        20,
+                        "createdAt",
+                        "desc"
+                )
+        );
+
+        assertEquals(ErrorCode.INVALID_REQUEST, exception.getErrorCode());
+        verifyNoInteractions(transactionRepository);
         verifyNoInteractions(accountClient);
     }
 
