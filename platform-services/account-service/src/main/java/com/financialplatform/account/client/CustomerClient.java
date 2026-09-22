@@ -2,7 +2,7 @@ package com.financialplatform.account.client;
 
 import com.financialplatform.account.exception.CustomerServiceUnavailableException;
 import com.financialplatform.common.response.ApiResponse;
-import lombok.RequiredArgsConstructor;
+import com.financialplatform.common.web.CorrelationIdInterceptor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
@@ -13,30 +13,41 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 @Component
-@RequiredArgsConstructor
 public class CustomerClient {
 
-    private final RestClient.Builder restClientBuilder;
+    private final RestClient restClient;
 
-    @Value("${services.customer.base-url}")
-    private String customerServiceBaseUrl;
+    public CustomerClient(
+            RestClient.Builder builder,
+            @Value("${services.customer.base-url}") String baseUrl) {
 
-    public CustomerLookupResponse getCustomerById(Long customerId) {
+        this.restClient = builder
+                .clone()
+                .baseUrl(baseUrl)
+                .requestInterceptor(
+                        new CorrelationIdInterceptor()
+                )
+                .build();
+    }
+
+    public CustomerLookupResponse getCustomerById(
+            Long customerId) {
 
         try {
-
             ApiResponse<CustomerLookupResponse> response =
-                    restClientBuilder
-                            .baseUrl(customerServiceBaseUrl)
-                            .build()
+                    restClient
                             .get()
-                            .uri("/api/v1/customers/{customerId}", customerId)
+                            .uri(
+                                    "/api/v1/customers/{customerId}",
+                                    customerId
+                            )
                             .retrieve()
                             .onStatus(
                                     status -> status.value() == 404,
                                     (request, responseEntity) -> {
                                         throw new IllegalArgumentException(
-                                                "Customer not found with ID: " + customerId
+                                                "Customer not found with ID: "
+                                                        + customerId
                                         );
                                     }
                             )
@@ -54,13 +65,66 @@ public class CustomerClient {
                                     }
                             );
 
-            if (response == null || response.data() == null) {
+            if (response == null
+                    || !response.success()
+                    || response.data() == null
+                    || !customerId.equals(
+                    response.data().customerId())
+                    || response.data().customerStatus() == null) {
+
                 throw new CustomerServiceUnavailableException(
                         "Invalid response received from Customer Service"
                 );
             }
 
             return response.data();
+
+        } catch (ResourceAccessException ex) {
+
+            throw new CustomerServiceUnavailableException(
+                    "Customer Service is currently unavailable"
+            );
+        }
+    }
+
+    public boolean isCustomerKycVerified(
+            Long customerId) {
+
+        try {
+            CustomerKycApiResponse response =
+                    restClient
+                            .get()
+                            .uri(
+                                    "/api/v1/customers/{customerId}/kyc",
+                                    customerId
+                            )
+                            .retrieve()
+                            .body(CustomerKycApiResponse.class);
+
+            if (response == null
+                    || !response.success()
+                    || response.data() == null
+                    || response.data().customerId() == null
+                    || !customerId.equals(
+                    response.data().customerId())
+                    || response.data().kycStatus() == null) {
+
+                return false;
+            }
+
+            return "VERIFIED".equalsIgnoreCase(
+                    response.data().kycStatus()
+            );
+
+        } catch (HttpClientErrorException.NotFound ex) {
+
+            return false;
+
+        } catch (HttpServerErrorException ex) {
+
+            throw new CustomerServiceUnavailableException(
+                    "Customer Service is currently unavailable"
+            );
 
         } catch (ResourceAccessException ex) {
 
@@ -78,6 +142,7 @@ public class CustomerClient {
             String customerStatus
     ) {
     }
+
     private record CustomerKycData(
             Long kycId,
             Long customerId,
@@ -96,41 +161,5 @@ public class CustomerClient {
             String message,
             CustomerKycData data
     ) {
-    }
-    public boolean isCustomerKycVerified(Long customerId) {
-
-        try {
-
-            CustomerKycApiResponse response =
-                    restClientBuilder
-                            .baseUrl(customerServiceBaseUrl)
-                            .build()
-                            .get()
-                            .uri("/api/v1/customers/{customerId}/kyc", customerId)
-                            .retrieve()
-                            .body(CustomerKycApiResponse.class);
-
-            if (response == null || response.data() == null) {
-                return false;
-            }
-
-            return "VERIFIED".equalsIgnoreCase(response.data().kycStatus());
-
-        } catch (HttpClientErrorException.NotFound ex) {
-
-            return false;
-
-        } catch (HttpServerErrorException ex) {
-
-            throw new CustomerServiceUnavailableException(
-                    "Customer Service is currently unavailable"
-            );
-
-        } catch (ResourceAccessException ex) {
-
-            throw new CustomerServiceUnavailableException(
-                    "Customer Service is currently unavailable"
-            );
-        }
     }
 }

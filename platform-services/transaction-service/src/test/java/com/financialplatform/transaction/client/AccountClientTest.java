@@ -11,6 +11,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.client.ResponseActions;
 import org.springframework.web.client.RestClient;
+import com.financialplatform.common.web.CorrelationIdFilter;
+import com.financialplatform.common.web.CorrelationIdInterceptor;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.MDC;
 
 import java.math.BigDecimal;
 import java.net.SocketTimeoutException;
@@ -26,21 +30,39 @@ class AccountClientTest {
 
     @BeforeEach
     void setUp() {
-        RestClient.Builder builder = RestClient.builder();
 
-        // Bind before AccountClient clones and builds the client.
-        server = MockRestServiceServer.bindTo(builder).build();
+        RestClient.Builder builder =
+                RestClient.builder();
 
-        String baseUrl = "http://account-service.test";
+        /*
+         * Bind the mock server before AccountClient clones
+         * and builds the RestClient.
+         */
+        server = MockRestServiceServer
+                .bindTo(builder)
+                .build();
+
+        ObjectMapper objectMapper =
+                new ObjectMapper()
+                        .findAndRegisterModules();
+
+        String baseUrl =
+                "http://account-service.test";
+
         accountClient = new AccountClient(
                 builder,
+                objectMapper,
                 baseUrl
         );
     }
 
     @AfterEach
     void verifyRequests() {
-        server.verify();
+        try {
+            server.verify();
+        } finally {
+            MDC.clear();
+        }
     }
 
     @Test
@@ -200,6 +222,33 @@ class AccountClientTest {
                         "http://account-service.test/api/v1/accounts/21"
                 ))
                 .andExpect(method(HttpMethod.GET));
+    }
+
+    @Test
+    void shouldPropagateCorrelationIdToAccountService() {
+
+        String correlationId = "day20-account-client-test";
+
+        MDC.put(
+                CorrelationIdFilter.CORRELATION_ID_MDC_KEY,
+                correlationId
+        );
+
+        expectLookup()
+                .andExpect(header(
+                        CorrelationIdFilter.CORRELATION_ID_HEADER,
+                        correlationId
+                ))
+                .andRespond(withSuccess(
+                        validResponse(),
+                        MediaType.APPLICATION_JSON
+                ));
+
+        AccountClient.AccountLookupResponse account =
+                accountClient.getAccountById(21L);
+
+        assertEquals(21L, account.accountId());
+        assertEquals("ACTIVE", account.accountStatus());
     }
 
     private String validResponse() {

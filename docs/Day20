@@ -1,0 +1,274 @@
+# Day 20 — Correlation ID and Distributed Request Tracing
+
+## Objective
+
+Day 20 focused on improving observability across the Customer, Account and Transaction microservices.
+
+We implemented correlation-ID support so that one request can be tracked across multiple services using a shared identifier.
+
+## Problem
+
+In a microservices system, one client request can generate logs in several applications.
+
+For example:
+
+```text
+Client → Transaction Service → Account Service
+```
+
+Without a common identifier, it is difficult to determine which Transaction Service and Account Service logs belong to the same request.
+
+## Solution
+
+We introduced the HTTP header:
+
+```http
+X-Correlation-ID
+```
+
+Every request now has a correlation ID.
+
+* If the client provides a valid ID, the application preserves it.
+* If the client does not provide one, the application generates a UUID.
+* The ID is added to application logs.
+* The ID is returned in the response header.
+* The ID is propagated to downstream services.
+
+## Shared correlation filter
+
+We created `CorrelationIdFilter` inside `platform-common`.
+
+The filter extends:
+
+```java
+OncePerRequestFilter
+```
+
+It performs the following process:
+
+1. Reads `X-Correlation-ID` from the incoming request.
+2. Validates its format and maximum length.
+3. Generates a UUID when the ID is missing or invalid.
+4. Stores the value in MDC.
+5. Adds the value to the response header.
+6. continues the controller and service execution.
+7. Removes the value from MDC after request completion.
+
+The filter is registered in:
+
+* Customer Service
+* Account Service
+* Transaction Service
+
+## MDC logging
+
+MDC means Mapped Diagnostic Context.
+
+The filter stores the correlation ID using:
+
+```java
+MDC.put("correlationId", correlationId);
+```
+
+The services use this logging property:
+
+```properties
+logging.pattern.correlation=[correlationId=%X{correlationId:-none}]
+```
+
+Request logs now include:
+
+```text
+[correlationId=day20-transaction-001]
+```
+
+This happens automatically without adding the correlation ID to every logging statement.
+
+## MDC cleanup
+
+The correlation ID is removed after request completion:
+
+```java
+finally {
+    MDC.remove("correlationId");
+}
+```
+
+This cleanup is important because Tomcat reuses request-processing threads.
+
+Without cleanup, a later request could incorrectly inherit an earlier request’s correlation ID.
+
+## Outgoing request propagation
+
+MDC values do not automatically travel between microservices.
+
+We created `CorrelationIdInterceptor`, which implements:
+
+```java
+ClientHttpRequestInterceptor
+```
+
+The interceptor:
+
+1. Reads the correlation ID from MDC.
+2. Adds it to the outgoing HTTP request.
+3. Executes the downstream request.
+
+Example outgoing header:
+
+```http
+X-Correlation-ID: day20-transaction-001
+```
+
+## RestClient integration
+
+The interceptor was registered with the RestClient used by Transaction Service’s `AccountClient`:
+
+```text
+Transaction Service → Account Service
+```
+
+It was also registered with Account Service’s `CustomerClient`:
+
+```text
+Account Service → Customer Service
+```
+
+The downstream service’s filter receives the header and places the same value in its own MDC.
+
+## Request flows
+
+### Transaction processing
+
+```text
+Client
+  → Transaction Service
+  → Account Service
+```
+
+Transaction Service and Account Service logs contain the same correlation ID.
+
+### Account creation
+
+```text
+Client
+  → Account Service
+  → Customer Service
+```
+
+Account Service and Customer Service logs contain the same correlation ID.
+
+## Response header
+
+The filter adds the correlation ID to every response:
+
+```http
+X-Correlation-ID: day20-transaction-001
+```
+
+This happens for successful and failed responses as long as the request passes through the filter.
+
+A user can report this ID when an issue occurs, allowing developers to search related logs.
+
+## Jackson configuration
+
+Transaction Service’s `AccountClient` requires:
+
+```java
+com.fasterxml.jackson.databind.ObjectMapper
+```
+
+The application did not contain a compatible Spring bean, so we added `JacksonConfig`.
+
+It defines:
+
+```java
+@Bean
+public ObjectMapper objectMapper() {
+    return new ObjectMapper()
+            .findAndRegisterModules();
+}
+```
+
+This allows Spring to inject `ObjectMapper` into `AccountClient`.
+
+## Testing
+
+We added client tests using `MockRestServiceServer`.
+
+The tests:
+
+* Place a correlation ID into MDC.
+* Execute the downstream client.
+* Verify the outgoing request contains `X-Correlation-ID`.
+* Validate the returned response.
+* Clear MDC after each test.
+
+Verified flows:
+
+```text
+AccountClient → Account Service
+CustomerClient → Customer Service
+```
+
+## Manual Swagger verification
+
+We tested all three running services:
+
+* Customer Service: `http://localhost:8080/swagger-ui/index.html`
+* Account Service: `http://localhost:8081/swagger-ui/index.html`
+* Transaction Service: `http://localhost:8082/swagger-ui/index.html`
+
+We verified:
+
+* A correlation ID is generated when no header is supplied.
+* A supplied correlation ID is preserved.
+* The response contains `X-Correlation-ID`.
+* The same ID appears in upstream and downstream logs.
+* Invalid or oversized IDs are handled safely.
+
+## Important behavior
+
+Startup and scheduled-task logs can display:
+
+```text
+correlationId=none
+```
+
+This is expected because they are not triggered by an incoming HTTP request.
+
+## Benefits
+
+The Day 20 implementation provides:
+
+* Cross-service request tracking.
+* Faster production troubleshooting.
+* Consistent searchable logs.
+* Client-visible diagnostic identifiers.
+* Reusable shared infrastructure.
+* Safe cleanup for reused web-server threads.
+* A foundation for centralized and distributed tracing.
+
+## Final verification
+
+Run the complete backend test suite:
+
+```powershell
+mvn clean test
+```
+
+Expected result:
+
+```text
+Platform Common ........ SUCCESS
+Customer Service ....... SUCCESS
+Account Service ........ SUCCESS
+Transaction Service .... SUCCESS
+BUILD SUCCESS
+```
+
+## Day 20 outcome
+
+The platform now supports log-level distributed request tracing across synchronous microservice calls.
+
+A single business request can be followed through the relevant services by searching for one correlation ID. Future observability work can build on this foundation using OpenTelemetry, Micrometer Tracing, centralized logging, Grafana, Zipkin or similar tools.
