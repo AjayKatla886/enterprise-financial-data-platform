@@ -1,0 +1,21 @@
+## Day 19 Summary
+
+Today we completed transaction-history functionality in the Transaction Service.
+
+We created three separate APIs for:
+
+* Viewing all transactions
+* Viewing transactions for a specific account
+* Viewing transactions across all accounts owned by a customer
+
+We added flexible filtering by transaction type, transaction status, and date range. The APIs also support pagination and safe sorting, which prevents large transaction histories from being returned in one request.
+
+For customer history, Transaction Service communicates with Account Service to retrieve the customer’s accounts and then searches for transactions involving those accounts.
+
+We used Spring Data JPA Specifications to dynamically build database queries based on the filters provided.
+
+We improved the API design by separating account and customer history into different endpoints. This removed the confusing Swagger behavior where both `accountId` and `customerId` appeared in the same request.
+
+Finally, we added automated tests for history retrieval, filtering, pagination, sorting, empty results, and invalid input. The complete Maven test suite passed successfully.
+
+Day 19 delivered a searchable, paginated, and production-style transaction-history feature.

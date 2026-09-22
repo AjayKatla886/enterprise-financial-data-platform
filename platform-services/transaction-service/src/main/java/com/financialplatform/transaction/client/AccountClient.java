@@ -13,6 +13,7 @@ import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import java.util.List;
 
 import java.math.BigDecimal;
 
@@ -96,6 +97,90 @@ public class AccountClient {
 
             throw new AccountServiceUnavailableException(
                     "Unable to retrieve account from Account Service",
+                    ex
+            );
+        }
+    }
+
+    public List<AccountLookupResponse> getAccountsByCustomerId(
+            Long customerId) {
+
+        try {
+            ApiResponse<List<AccountLookupResponse>> response =
+                    restClient
+                            .get()
+                            .uri(
+                                    "/api/v1/accounts/customer/{customerId}",
+                                    customerId
+                            )
+                            .retrieve()
+                            .onStatus(
+                                    status -> status.value() == 404,
+                                    (request, responseEntity) -> {
+                                        throw new TransactionBusinessException(
+                                                ErrorCode.CUSTOMER_NOT_FOUND,
+                                                "Customer not found with ID: "
+                                                        + customerId
+                                        );
+                                    }
+                            )
+                            .onStatus(
+                                    HttpStatusCode::is5xxServerError,
+                                    (request, responseEntity) -> {
+                                        throw new AccountServiceUnavailableException(
+                                                "Account Service customer-account lookup failed"
+                                        );
+                                    }
+                            )
+                            .body(
+                                    new ParameterizedTypeReference<
+                                            ApiResponse<
+                                                    List<AccountLookupResponse>>>() {
+                                    }
+                            );
+
+            if (response == null
+                    || !response.success()
+                    || response.data() == null) {
+
+                throw new AccountServiceUnavailableException(
+                        "Invalid customer-account response received "
+                                + "from Account Service"
+                );
+            }
+
+            boolean invalidAccount =
+                    response.data()
+                            .stream()
+                            .anyMatch(account ->
+                                    account == null
+                                            || account.accountId() == null
+                                            || !customerId.equals(
+                                            account.customerId()
+                                    )
+                                            || account.accountStatus() == null
+                                            || account.balance() == null
+                            );
+
+            if (invalidAccount) {
+                throw new AccountServiceUnavailableException(
+                        "Invalid customer-account data received "
+                                + "from Account Service"
+                );
+            }
+
+            return List.copyOf(response.data());
+
+        } catch (TransactionBusinessException |
+                 AccountServiceUnavailableException ex) {
+
+            throw ex;
+
+        } catch (RestClientException ex) {
+
+            throw new AccountServiceUnavailableException(
+                    "Unable to retrieve customer accounts "
+                            + "from Account Service",
                     ex
             );
         }

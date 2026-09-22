@@ -1,30 +1,276 @@
 package com.financialplatform.transaction.controller;
 
 import com.financialplatform.common.response.ApiResponse;
+import com.financialplatform.common.response.PageResponse;
 import com.financialplatform.transaction.dto.TransactionRequest;
 import com.financialplatform.transaction.dto.TransactionResponse;
 import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
+import com.financialplatform.transaction.entity.TransactionType;
 import com.financialplatform.transaction.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Validated
 @RestController
 @RequestMapping("/api/v1/transactions")
 @RequiredArgsConstructor
 @Tag(
         name = "Transaction Management",
-        description = "Transaction submission, execution, recovery, and retrieval"
+        description = """
+                Transaction submission, execution, reconciliation,
+                history, filtering, and retrieval
+                """
 )
 public class TransactionController {
 
     private final TransactionService transactionService;
+
+    // ============================================================
+    // All Transaction History
+    // ============================================================
+
+    @Operation(
+            summary = "Get all transaction history",
+            description = """
+                    Retrieves all transactions using optional transaction
+                    type, status, and creation-date filters.
+
+                    Results support pagination and sorting.
+                    """
+    )
+    @GetMapping
+    public ResponseEntity<
+            ApiResponse<PageResponse<TransactionResponse>>>
+    getTransactions(
+
+            @RequestParam(required = false)
+            TransactionType transactionType,
+
+            @RequestParam(required = false)
+            TransactionStatus status,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            LocalDateTime fromDate,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            LocalDateTime toDate,
+
+            @RequestParam(defaultValue = "0")
+            @Min(
+                    value = 0,
+                    message = "Page number must be zero or greater"
+            )
+            int page,
+
+            @RequestParam(defaultValue = "20")
+            @Min(
+                    value = 1,
+                    message = "Page size must be at least 1"
+            )
+            @Max(
+                    value = 100,
+                    message = "Page size must not exceed 100"
+            )
+            int size,
+
+            @RequestParam(defaultValue = "createdAt")
+            String sortBy,
+
+            @RequestParam(defaultValue = "desc")
+            String sortDir) {
+
+        return buildTransactionHistoryResponse(
+                null,
+                null,
+                transactionType,
+                status,
+                fromDate,
+                toDate,
+                page,
+                size,
+                sortBy,
+                sortDir
+        );
+    }
+
+    // ============================================================
+    // Account Transaction History
+    // ============================================================
+
+    @Operation(
+            summary = "Get transaction history by account",
+            description = """
+                    Retrieves transactions involving the specified account.
+
+                    A transaction matches when the account is either the
+                    source account or the target account.
+
+                    Results support filtering, pagination, and sorting.
+                    """
+    )
+    @GetMapping("/account/{accountId}")
+    public ResponseEntity<
+            ApiResponse<PageResponse<TransactionResponse>>>
+    getTransactionsByAccount(
+
+            @PathVariable
+            @Positive(
+                    message = "Account ID must be greater than zero"
+            )
+            Long accountId,
+
+            @RequestParam(required = false)
+            TransactionType transactionType,
+
+            @RequestParam(required = false)
+            TransactionStatus status,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            LocalDateTime fromDate,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            LocalDateTime toDate,
+
+            @RequestParam(defaultValue = "0")
+            @Min(
+                    value = 0,
+                    message = "Page number must be zero or greater"
+            )
+            int page,
+
+            @RequestParam(defaultValue = "20")
+            @Min(
+                    value = 1,
+                    message = "Page size must be at least 1"
+            )
+            @Max(
+                    value = 100,
+                    message = "Page size must not exceed 100"
+            )
+            int size,
+
+            @RequestParam(defaultValue = "createdAt")
+            String sortBy,
+
+            @RequestParam(defaultValue = "desc")
+            String sortDir) {
+
+        return buildTransactionHistoryResponse(
+                accountId,
+                null,
+                transactionType,
+                status,
+                fromDate,
+                toDate,
+                page,
+                size,
+                sortBy,
+                sortDir
+        );
+    }
+
+    // ============================================================
+    // Customer Transaction History
+    // ============================================================
+
+    @Operation(
+            summary = "Get transaction history by customer",
+            description = """
+                    Retrieves transactions involving any account belonging
+                    to the specified customer.
+
+                    Transaction Service obtains the customer's accounts
+                    from Account Service before searching transactions.
+
+                    Results support filtering, pagination, and sorting.
+                    """
+    )
+    @GetMapping("/customer/{customerId}")
+    public ResponseEntity<
+            ApiResponse<PageResponse<TransactionResponse>>>
+    getTransactionsByCustomer(
+
+            @PathVariable
+            @Positive(
+                    message = "Customer ID must be greater than zero"
+            )
+            Long customerId,
+
+            @RequestParam(required = false)
+            TransactionType transactionType,
+
+            @RequestParam(required = false)
+            TransactionStatus status,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            LocalDateTime fromDate,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            LocalDateTime toDate,
+
+            @RequestParam(defaultValue = "0")
+            @Min(
+                    value = 0,
+                    message = "Page number must be zero or greater"
+            )
+            int page,
+
+            @RequestParam(defaultValue = "20")
+            @Min(
+                    value = 1,
+                    message = "Page size must be at least 1"
+            )
+            @Max(
+                    value = 100,
+                    message = "Page size must not exceed 100"
+            )
+            int size,
+
+            @RequestParam(defaultValue = "createdAt")
+            String sortBy,
+
+            @RequestParam(defaultValue = "desc")
+            String sortDir) {
+
+        return buildTransactionHistoryResponse(
+                null,
+                customerId,
+                transactionType,
+                status,
+                fromDate,
+                toDate,
+                page,
+                size,
+                sortBy,
+                sortDir
+        );
+    }
+
+    // ============================================================
+    // Submit Transaction
+    // ============================================================
 
     @Operation(
             summary = "Submit and process transaction",
@@ -54,7 +300,10 @@ public class TransactionController {
     submitTransaction(
 
             @Parameter(
-                    description = "Unique key that prevents duplicate transaction processing",
+                    description = """
+                            Unique key that prevents duplicate
+                            transaction processing
+                            """,
                     required = true,
                     example = "deposit-account-21-001"
             )
@@ -80,22 +329,20 @@ public class TransactionController {
         TransactionStatus transactionStatus =
                 transaction.getTransactionStatus();
 
-        String message =
-                getSubmissionMessage(transactionStatus);
-
-        HttpStatus responseStatus =
-                getSubmissionStatus(transactionStatus);
-
         return ResponseEntity
-                .status(responseStatus)
+                .status(getSubmissionStatus(transactionStatus))
                 .body(
                         new ApiResponse<>(
                                 true,
-                                message,
+                                getSubmissionMessage(transactionStatus),
                                 transactionResponse
                         )
                 );
     }
+
+    // ============================================================
+    // Get Transaction by Reference
+    // ============================================================
 
     @Operation(
             summary = "Get transaction by reference",
@@ -112,22 +359,125 @@ public class TransactionController {
             String transactionReference) {
 
         Transaction transaction =
-                transactionService
-                        .getTransactionByReference(
-                                transactionReference
-                        );
-
-        TransactionResponse transactionResponse =
-                TransactionResponse.from(transaction);
+                transactionService.getTransactionByReference(
+                        transactionReference
+                );
 
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
                         "Transaction retrieved successfully",
-                        transactionResponse
+                        TransactionResponse.from(transaction)
                 )
         );
     }
+
+    // ============================================================
+    // Reconcile Transaction
+    // ============================================================
+
+    @Operation(
+            summary = "Reconcile transaction",
+            description = """
+                    Checks the Account Service ledger to determine the
+                    outcome of a PROCESSING or
+                    RECONCILIATION_REQUIRED transaction.
+
+                    This endpoint verifies the existing balance operation.
+                    It does not execute the debit, credit, or transfer
+                    again.
+                    """
+    )
+    @PostMapping("/{transactionReference}/reconcile")
+    public ResponseEntity<ApiResponse<TransactionResponse>>
+    reconcileTransaction(
+
+            @PathVariable
+            String transactionReference) {
+
+        Transaction transaction =
+                transactionService.reconcileTransaction(
+                        transactionReference
+                );
+
+        TransactionStatus transactionStatus =
+                transaction.getTransactionStatus();
+
+        return ResponseEntity
+                .status(getReconciliationStatus(transactionStatus))
+                .body(
+                        new ApiResponse<>(
+                                true,
+                                getReconciliationMessage(
+                                        transactionStatus
+                                ),
+                                TransactionResponse.from(transaction)
+                        )
+                );
+    }
+
+    // ============================================================
+    // Transaction History Response Builder
+    // ============================================================
+
+    private ResponseEntity<
+            ApiResponse<PageResponse<TransactionResponse>>>
+    buildTransactionHistoryResponse(
+
+            Long accountId,
+            Long customerId,
+            TransactionType transactionType,
+            TransactionStatus status,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
+
+        Page<Transaction> transactionPage =
+                transactionService.getTransactions(
+                        accountId,
+                        customerId,
+                        transactionType,
+                        status,
+                        fromDate,
+                        toDate,
+                        page,
+                        size,
+                        sortBy,
+                        sortDir
+                );
+
+        List<TransactionResponse> content =
+                transactionPage.getContent()
+                        .stream()
+                        .map(TransactionResponse::from)
+                        .toList();
+
+        PageResponse<TransactionResponse> pageResponse =
+                new PageResponse<>(
+                        content,
+                        transactionPage.getNumber(),
+                        transactionPage.getSize(),
+                        transactionPage.getTotalElements(),
+                        transactionPage.getTotalPages(),
+                        transactionPage.isFirst(),
+                        transactionPage.isLast()
+                );
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        "Transactions retrieved successfully",
+                        pageResponse
+                )
+        );
+    }
+
+    // ============================================================
+    // Response Messages and Status Codes
+    // ============================================================
 
     private String getSubmissionMessage(
             TransactionStatus status) {
@@ -170,49 +520,46 @@ public class TransactionController {
                     HttpStatus.ACCEPTED;
         };
     }
-    @Operation(
-            summary = "Reconcile transaction",
-            description = """
-                Checks the Account Service ledger to determine the outcome
-                of a PROCESSING or RECONCILIATION_REQUIRED transaction.
 
-                This endpoint only verifies the existing operation.
-                It does not execute the debit, credit, or transfer again.
-                """
-    )
-    @PostMapping("/{transactionReference}/reconcile")
-    public ResponseEntity<ApiResponse<TransactionResponse>>
-    reconcileTransaction(
-            @PathVariable String transactionReference) {
+    private String getReconciliationMessage(
+            TransactionStatus status) {
 
-        Transaction transaction =
-                transactionService.reconcileTransaction(
-                        transactionReference
-                );
+        return switch (status) {
 
-        TransactionResponse response =
-                TransactionResponse.from(transaction);
+            case COMPLETED ->
+                    "Transaction reconciliation completed successfully";
 
-        String message =
-                transaction.getTransactionStatus()
-                        == TransactionStatus.COMPLETED
-                        ? "Transaction reconciliation completed successfully"
-                        : "Transaction still requires reconciliation";
+            case RECONCILIATION_REQUIRED ->
+                    "Transaction still requires reconciliation";
 
-        HttpStatus status =
-                transaction.getTransactionStatus()
-                        == TransactionStatus.COMPLETED
-                        ? HttpStatus.OK
-                        : HttpStatus.ACCEPTED;
+            case MANUAL_REVIEW ->
+                    "Transaction requires manual review";
 
-        return ResponseEntity
-                .status(status)
-                .body(
-                        new ApiResponse<>(
-                                true,
-                                message,
-                                response
-                        )
-                );
+            case PROCESSING ->
+                    "Transaction reconciliation is still processing";
+
+            case FAILED ->
+                    "Transaction processing failed";
+
+            case PENDING ->
+                    "Transaction processing is pending";
+        };
+    }
+
+    private HttpStatus getReconciliationStatus(
+            TransactionStatus status) {
+
+        return switch (status) {
+
+            case COMPLETED,
+                 FAILED ->
+                    HttpStatus.OK;
+
+            case PENDING,
+                 PROCESSING,
+                 RECONCILIATION_REQUIRED,
+                 MANUAL_REVIEW ->
+                    HttpStatus.ACCEPTED;
+        };
     }
 }

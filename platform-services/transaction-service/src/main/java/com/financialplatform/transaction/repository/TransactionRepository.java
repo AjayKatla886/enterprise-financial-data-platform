@@ -4,6 +4,7 @@ import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -13,7 +14,8 @@ import java.util.List;
 import java.util.Optional;
 
 public interface TransactionRepository
-        extends JpaRepository<Transaction, Long> {
+        extends JpaRepository<Transaction, Long>,
+        JpaSpecificationExecutor<Transaction> {
 
     Optional<Transaction> findByTransactionReference(
             String transactionReference
@@ -32,6 +34,7 @@ public interface TransactionRepository
             ORDER BY transaction.updatedAt ASC
             """)
     List<Transaction> findReconciliationCandidates(
+
             @Param("statuses")
             Collection<TransactionStatus> statuses,
 
