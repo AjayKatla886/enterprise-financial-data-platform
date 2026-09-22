@@ -1,0 +1,272 @@
+# Day 21 – Microservice Resilience with Resilience4j
+
+## Goal
+
+Improve communication between Transaction Service and Account Service so temporary network or service failures do not immediately break transaction processing.
+
+## What We Implemented
+
+### 1. Resilience4j dependencies
+
+Added Resilience4j and Spring AOP support to Transaction Service.
+
+```xml
+<dependency>
+    <groupId>io.github.resilience4j</groupId>
+    <artifactId>resilience4j-spring-boot4</artifactId>
+    <version>${resilience4j.version}</version>
+</dependency>
+
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-aspectj</artifactId>
+</dependency>
+```
+
+Spring AOP enables Spring to intercept methods annotated with Resilience4j annotations.
+
+---
+
+### 2. Retry mechanism
+
+Added retry handling to `AccountClient.getAccountById()`:
+
+```java
+@Retry(name = "accountService")
+```
+
+When Account Service has a temporary failure, Transaction Service automatically retries the request.
+
+Configuration:
+
+```properties
+resilience4j.retry.instances.accountService.max-attempts=3
+resilience4j.retry.instances.accountService.wait-duration=500ms
+resilience4j.retry.instances.accountService.enable-exponential-backoff=true
+resilience4j.retry.instances.accountService.exponential-backoff-multiplier=2
+```
+
+The retry delays are approximately:
+
+1. Initial request
+2. First retry after 500 milliseconds
+3. Second retry after 1 second
+
+Only temporary `AccountServiceUnavailableException` failures are retried.
+
+Business exceptions such as account not found or inactive account are not retried.
+
+---
+
+### 3. Circuit breaker
+
+Added circuit-breaker protection:
+
+```java
+@CircuitBreaker(name = "accountService")
+```
+
+The circuit breaker monitors failures when Transaction Service calls Account Service.
+
+Its primary states are:
+
+* `CLOSED`: Calls are allowed and monitored.
+* `OPEN`: Calls are rejected immediately.
+* `HALF_OPEN`: Limited calls are permitted to check whether Account Service recovered.
+
+Configured flow:
+
+```text
+CLOSED → OPEN → HALF_OPEN → CLOSED
+```
+
+If the recovery calls fail:
+
+```text
+HALF_OPEN → OPEN
+```
+
+Configuration includes:
+
+```properties
+resilience4j.circuitbreaker.instances.accountService.sliding-window-size=10
+resilience4j.circuitbreaker.instances.accountService.minimum-number-of-calls=5
+resilience4j.circuitbreaker.instances.accountService.failure-rate-threshold=50
+resilience4j.circuitbreaker.instances.accountService.wait-duration-in-open-state=30s
+resilience4j.circuitbreaker.instances.accountService.permitted-number-of-calls-in-half-open-state=3
+```
+
+The circuit opens when at least five calls have been recorded and the failure rate reaches 50%.
+
+---
+
+### 4. Fail-fast behavior
+
+When the circuit is open, Transaction Service does not continue calling the unavailable Account Service.
+
+Instead, Resilience4j throws:
+
+```java
+CallNotPermittedException
+```
+
+The global exception handler converts it into:
+
+```text
+HTTP 503 Service Unavailable
+```
+
+Example response:
+
+```json
+{
+  "success": false,
+  "errorCode": "DEP-002",
+  "message": "Account Service is temporarily unavailable",
+  "timestamp": "2026-09-22T16:30:00",
+  "path": "/api/v1/transactions"
+}
+```
+
+This prevents:
+
+* Unnecessary network requests
+* Thread exhaustion
+* Long request delays
+* Cascading failures across services
+
+---
+
+### 5. HTTP timeouts
+
+Configured time limits for Account Service calls:
+
+```properties
+spring.http.clients.connect-timeout=2s
+spring.http.clients.read-timeout=3s
+```
+
+* Connection timeout limits how long Transaction Service waits to establish the connection.
+* Read timeout limits how long it waits for Account Service to return a response.
+
+Without timeouts, a request could remain blocked for an excessive amount of time.
+
+---
+
+### 6. Exception classification
+
+Temporary dependency failures are recorded:
+
+```properties
+resilience4j.circuitbreaker.instances.accountService.record-exceptions=\
+com.financialplatform.transaction.exception.AccountServiceUnavailableException
+```
+
+Business exceptions are ignored:
+
+```properties
+resilience4j.circuitbreaker.instances.accountService.ignore-exceptions=\
+com.financialplatform.transaction.exception.TransactionBusinessException
+```
+
+Examples:
+
+| Situation                   | Retry | Circuit failure |
+| --------------------------- | ----: | --------------: |
+| Account Service unavailable |   Yes |             Yes |
+| Connection timeout          |   Yes |             Yes |
+| Read timeout                |   Yes |             Yes |
+| Account not found           |    No |              No |
+| Account inactive            |    No |              No |
+| Invalid transaction request |    No |              No |
+
+---
+
+### 7. Actuator monitoring
+
+Exposed operational endpoints:
+
+```properties
+management.endpoints.web.exposure.include=\
+health,info,circuitbreakers,circuitbreakerevents,retries,retryevents
+```
+
+Useful URLs:
+
+```text
+http://localhost:8082/actuator/health
+http://localhost:8082/actuator/circuitbreakers
+http://localhost:8082/actuator/circuitbreakerevents
+http://localhost:8082/actuator/retries
+http://localhost:8082/actuator/retryevents
+```
+
+These endpoints show:
+
+* Circuit-breaker state
+* Buffered calls
+* Failed calls
+* Rejected calls
+* Retry attempts
+* State-transition events
+
+---
+
+### 8. Manual resilience testing
+
+We tested the behavior by:
+
+1. Starting Transaction Service.
+2. Stopping Account Service.
+3. Submitting transaction requests.
+4. Confirming HTTP `503` responses.
+5. Observing the circuit transition to `OPEN`.
+6. Waiting for it to move to `HALF_OPEN`.
+7. Restarting Account Service.
+8. Sending a successful request.
+9. Confirming the circuit returned to `CLOSED`.
+
+---
+
+### 9. Automated integration testing
+
+Created:
+
+```text
+AccountClientResilienceIntegrationTest.java
+```
+
+The test uses a lightweight local HTTP server to simulate Account Service.
+
+It verifies:
+
+* Two temporary failures followed by success
+* Three total HTTP attempts
+* Circuit opening after repeated dependency failures
+* Open-circuit requests rejected without reaching Account Service
+
+Test-specific thresholds use six calls because two logical calls can each produce three HTTP attempts.
+
+This is intentionally different from production configuration.
+
+---
+
+## Important Learning
+
+Retry and circuit breaker solve different problems:
+
+* Retry handles short, temporary failures.
+* Circuit breaker protects the system from continued failures.
+* Timeout limits how long each attempt can wait.
+* Exception classification ensures business errors are not treated as infrastructure failures.
+* Actuator provides visibility into resilience behavior.
+
+## Day 21 Result
+
+Transaction Service now communicates with Account Service through a controlled resilience layer containing:
+
+```text
+Timeout → Retry → Circuit Breaker → Exception Handling → Monitoring
+```
+
+This makes the platform more stable during temporary Account Service failures and reduces the risk of cascading failures across microservices.

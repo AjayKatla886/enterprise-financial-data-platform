@@ -15,7 +15,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import java.util.List;
 import com.financialplatform.common.web.CorrelationIdInterceptor;
-
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import java.math.BigDecimal;
 
 @Component
@@ -40,6 +41,8 @@ public class AccountClient {
                 .build();
     }
 
+    @CircuitBreaker(name = "accountService")
+    @Retry(name = "accountService")
     public AccountLookupResponse getAccountById(
             Long accountId) {
 

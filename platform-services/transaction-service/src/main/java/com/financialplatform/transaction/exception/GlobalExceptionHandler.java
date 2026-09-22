@@ -13,6 +13,7 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
@@ -57,6 +58,25 @@ public class GlobalExceptionHandler {
                 status,
                 ex.getErrorCode(),
                 ex.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(CallNotPermittedException.class)
+    public ResponseEntity<ErrorResponse> handleOpenCircuit(
+            CallNotPermittedException ex,
+            HttpServletRequest request) {
+
+        log.warn(
+                "Account Service circuit breaker rejected the request. "
+                        + "circuitBreaker={}",
+                ex.getCausingCircuitBreakerName()
+        );
+
+        return buildErrorResponse(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ErrorCode.ACCOUNT_SERVICE_UNAVAILABLE,
+                "Account Service is temporarily unavailable",
                 request
         );
     }
