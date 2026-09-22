@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import java.util.List;
+import com.financialplatform.common.web.CorrelationIdInterceptor;
 
 import java.math.BigDecimal;
 
@@ -25,15 +26,18 @@ public class AccountClient {
 
     public AccountClient(
             RestClient.Builder builder,
+            ObjectMapper objectMapper,
             @Value("${services.account.base-url}") String baseUrl) {
 
-        this.restClient = builder.clone()
-                .baseUrl(baseUrl)
-                .build();
+        this.objectMapper = objectMapper;
 
-        this.objectMapper =
-                new ObjectMapper()
-                        .findAndRegisterModules();
+        this.restClient = builder
+                .clone()
+                .baseUrl(baseUrl)
+                .requestInterceptor(
+                        new CorrelationIdInterceptor()
+                )
+                .build();
     }
 
     public AccountLookupResponse getAccountById(
