@@ -1,0 +1,232 @@
+# Day 22 Notes — Transaction Status Audit History
+
+## Objective
+
+Implement a permanent audit trail for every transaction status change.
+
+Previously, the `TRANSACTIONS` table stored only the current status. After Day 22, the platform can show the complete transaction lifecycle.
+
+## Status lifecycle
+
+A successful transaction follows:
+
+```text
+NULL → PENDING → PROCESSING → COMPLETED
+```
+
+Other possible transitions include:
+
+```text
+PROCESSING → FAILED
+PROCESSING → RECONCILIATION_REQUIRED
+RECONCILIATION_REQUIRED → COMPLETED
+RECONCILIATION_REQUIRED → MANUAL_REVIEW
+```
+
+## Database migration
+
+Created:
+
+```text
+V5__create_transaction_status_history.sql
+```
+
+New table:
+
+```text
+TRANSACTION_STATUS_HISTORY
+```
+
+It stores:
+
+- Status-history ID
+- Transaction ID
+- Transaction reference
+- Previous status
+- New status
+- Transition source
+- Transition reason
+- Correlation ID
+- Creation timestamp
+
+The history table is append-only: each transition creates a new record instead of overwriting earlier records.
+
+## New transition-source enum
+
+Created `TransactionTransitionSource`:
+
+```java
+TRANSACTION_SUBMISSION
+TRANSACTION_PROCESSOR
+RECONCILIATION_API
+RECONCILIATION_SCHEDULER
+MANUAL_REVIEW
+```
+
+It identifies which application process caused a status change.
+
+## New history entity and repository
+
+Created:
+
+```text
+TransactionStatusHistory
+TransactionStatusHistoryRepository
+```
+
+The repository retrieves history chronologically:
+
+```java
+findByTransactionReferenceOrderByCreatedAtAscStatusHistoryIdAsc(...)
+```
+
+The secondary sort by history ID gives deterministic ordering when two records have similar timestamps.
+
+## Centralized transition service
+
+Created:
+
+```text
+TransactionStatusTransitionService
+```
+
+Important methods:
+
+```java
+saveInitialTransaction(...)
+```
+
+Saves the new transaction and writes:
+
+```text
+NULL → PENDING
+```
+
+```java
+transition(...)
+```
+
+Updates the transaction status and writes the corresponding history record.
+
+Both operations use `@Transactional`, ensuring that the transaction update and audit-history insert commit or roll back together.
+
+## Duplicate transition handling
+
+If the transaction already has the requested status:
+
+```java
+previousStatus == newStatus
+```
+
+the service returns the transaction without inserting duplicate history.
+
+This prevents repeated reconciliation calls from creating meaningless history rows.
+
+## Transition reason validation
+
+Transition reasons are:
+
+- Trimmed before persistence
+- Converted to `null` when blank
+- Limited to 500 characters
+
+Invalid reasons are rejected before database operations occur.
+
+## Transaction processing updates
+
+`TransactionService` now uses the centralized transition service for:
+
+- Initial transaction creation
+- `PENDING → PROCESSING`
+- `PROCESSING → COMPLETED`
+- `PROCESSING → FAILED`
+- Moving unresolved transactions to reconciliation
+
+This prevents status changes from bypassing audit-history creation.
+
+## Reconciliation updates
+
+Manual API reconciliation uses:
+
+```java
+RECONCILIATION_API
+```
+
+Scheduled reconciliation uses:
+
+```java
+RECONCILIATION_SCHEDULER
+```
+
+Transactions moved to manual review are also recorded through the transition service.
+
+## History API
+
+Added:
+
+```http
+GET /api/v1/transactions/{transactionReference}/history
+```
+
+It returns the complete ordered transaction status history.
+
+Supporting classes:
+
+```text
+TransactionStatusHistoryResponse
+TransactionStatusHistoryService
+```
+
+## Correlation ID tracking
+
+The transition service reads the correlation ID from SLF4J MDC:
+
+```java
+MDC.get("correlationId")
+```
+
+It stores that value in every status-history row, connecting:
+
+```text
+API request → logs → transaction → status changes
+```
+
+## Testing
+
+Added:
+
+```text
+TransactionStatusTransitionServiceTest
+```
+
+Test cases cover:
+
+- Initial history creation
+- Normal status transition
+- Duplicate-status prevention
+- Unsaved transaction rejection
+- Transition-reason length validation
+
+Updated:
+
+```text
+TransactionServiceTest
+```
+
+The new transition service was mocked while preserving existing repository behavior and verification counts.
+
+## Verified Oracle result
+
+The tested transaction produced:
+
+| Previous status | New status | Source |
+|---|---|---|
+| `NULL` | `PENDING` | `TRANSACTION_SUBMISSION` |
+| `PENDING` | `PROCESSING` | `TRANSACTION_PROCESSOR` |
+| `PROCESSING` | `COMPLETED` | `TRANSACTION_PROCESSOR` |
+
+The database also stored transition reasons, timestamps, transaction identifiers, and the correlation ID.
+
+## Interview explanation
+
+“On Day 22, I implemented a transaction status audit trail. Instead of storing only the latest status, every transition is appended to a history table with its previous and new status, transition source, reason, timestamp, and correlation ID. I centralized all status updates in a transactional service so the business update and audit record commit or roll back together. I also exposed an API to retrieve the complete lifecycle and added unit tests for transition behavior and validation.
