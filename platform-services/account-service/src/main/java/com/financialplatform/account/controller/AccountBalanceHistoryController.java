@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import com.financialplatform.account.dto.AccountStatementResponse;
 
 import java.time.LocalDateTime;
 
@@ -158,6 +159,118 @@ public class AccountBalanceHistoryController {
                         true,
                         "Account balance history retrieved successfully",
                         history
+                )
+        );
+    }
+    @Operation(
+            summary = "Get account statement",
+            description = """
+                Generates an account statement for the requested date range.
+
+                The response includes the opening balance, closing balance,
+                total credits, total debits, credit and debit counts, and
+                paginated ledger operations.
+
+                The statement period must not exceed 366 days.
+                """
+    )
+    @GetMapping("/{accountId}/statement")
+    public ResponseEntity<ApiResponse<AccountStatementResponse>>
+    getAccountStatement(
+
+            @Parameter(
+                    description = "Account ID",
+                    required = true,
+                    example = "21"
+            )
+            @PathVariable
+            @Positive(
+                    message = "Account ID must be greater than zero"
+            )
+            Long accountId,
+
+            @Parameter(
+                    description = """
+                        Inclusive statement start date and time.
+                        Use ISO-8601 format.
+                        """,
+                    required = true,
+                    example = "2026-09-01T00:00:00"
+            )
+            @RequestParam
+            @DateTimeFormat(
+                    iso = DateTimeFormat.ISO.DATE_TIME
+            )
+            LocalDateTime fromDate,
+
+            @Parameter(
+                    description = """
+                        Inclusive statement end date and time.
+                        Use ISO-8601 format.
+                        """,
+                    required = true,
+                    example = "2026-09-30T23:59:59"
+            )
+            @RequestParam
+            @DateTimeFormat(
+                    iso = DateTimeFormat.ISO.DATE_TIME
+            )
+            LocalDateTime toDate,
+
+            @Parameter(
+                    description = "Zero-based page number",
+                    example = "0"
+            )
+            @RequestParam(defaultValue = "0")
+            @Min(
+                    value = 0,
+                    message = "Page number must not be negative"
+            )
+            int page,
+
+            @Parameter(
+                    description = "Number of statement operations per page",
+                    example = "20"
+            )
+            @RequestParam(defaultValue = "20")
+            @Min(
+                    value = 1,
+                    message = "Page size must be at least 1"
+            )
+            @Max(
+                    value = 100,
+                    message = "Page size must not exceed 100"
+            )
+            int size) {
+
+        Pageable pageable = PageRequest.of(
+                page,
+                size,
+                Sort.by(
+                        Sort.Direction.DESC,
+                        "createdAt"
+                ).and(
+                        Sort.by(
+                                Sort.Direction.DESC,
+                                "balanceOperationId"
+                        )
+                )
+        );
+
+        AccountStatementResponse statement =
+                balanceOperationService
+                        .getAccountStatement(
+                                accountId,
+                                fromDate,
+                                toDate,
+                                pageable
+                        );
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        "Account statement retrieved successfully",
+                        statement
                 )
         );
     }

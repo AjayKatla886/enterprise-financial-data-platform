@@ -20,6 +20,14 @@ import com.financialplatform.account.specification.BalanceOperationSpecification
 import com.financialplatform.common.response.PageResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import com.financialplatform.account.dto.AccountStatementResponse;
+import com.financialplatform.account.specification.BalanceOperationSpecification;
+import com.financialplatform.common.response.PageResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
+import java.time.temporal.ChronoUnit;
+import java.util.Optional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +43,7 @@ public class BalanceOperationService {
 
     private static final int MAX_OPERATION_REFERENCE_LENGTH = 150;
     private static final int MAX_TRANSFER_REFERENCE_LENGTH = 143;
+    private static final long MAX_STATEMENT_PERIOD_DAYS = 366;
 
     private final AccountRepository accountRepository;
     private final BalanceOperationRepository balanceOperationRepository;
@@ -470,6 +479,165 @@ public class BalanceOperationService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public AccountStatementResponse getAccountStatement(
+            Long accountId,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Pageable pageable) {
+
+        validateStatementRequest(
+                accountId,
+                fromDate,
+                toDate,
+                pageable
+        );
+
+        Account account = accountRepository
+                .findById(accountId)
+                .orElseThrow(() -> accountNotFound(accountId));
+
+        Optional<BalanceOperation> firstOperationInPeriod =
+                balanceOperationRepository
+                        .findFirstByAccountIdAndCreatedAtBetweenOrderByCreatedAtAscBalanceOperationIdAsc(
+                                accountId,
+                                fromDate,
+                                toDate
+                        );
+
+        Optional<BalanceOperation> lastOperationInPeriod =
+                balanceOperationRepository
+                        .findFirstByAccountIdAndCreatedAtBetweenOrderByCreatedAtDescBalanceOperationIdDesc(
+                                accountId,
+                                fromDate,
+                                toDate
+                        );
+
+        Optional<BalanceOperation> operationBeforePeriod =
+                balanceOperationRepository
+                        .findFirstByAccountIdAndCreatedAtLessThanOrderByCreatedAtDescBalanceOperationIdDesc(
+                                accountId,
+                                fromDate
+                        );
+
+        BigDecimal openingBalance =
+                determineOpeningBalance(
+                        firstOperationInPeriod,
+                        operationBeforePeriod
+                );
+
+        BigDecimal closingBalance =
+                lastOperationInPeriod
+                        .map(BalanceOperation::getBalanceAfter)
+                        .orElse(openingBalance);
+
+        BigDecimal totalCredits =
+                defaultAmount(
+                        balanceOperationRepository
+                                .sumAmountByAccountAndTypeAndPeriod(
+                                        accountId,
+                                        BalanceOperationType.CREDIT,
+                                        fromDate,
+                                        toDate
+                                )
+                );
+
+        BigDecimal totalDebits =
+                defaultAmount(
+                        balanceOperationRepository
+                                .sumAmountByAccountAndTypeAndPeriod(
+                                        accountId,
+                                        BalanceOperationType.DEBIT,
+                                        fromDate,
+                                        toDate
+                                )
+                );
+
+        long creditCount =
+                balanceOperationRepository
+                        .countByAccountAndTypeAndPeriod(
+                                accountId,
+                                BalanceOperationType.CREDIT,
+                                fromDate,
+                                toDate
+                        );
+
+        long debitCount =
+                balanceOperationRepository
+                        .countByAccountAndTypeAndPeriod(
+                                accountId,
+                                BalanceOperationType.DEBIT,
+                                fromDate,
+                                toDate
+                        );
+
+        Page<BalanceOperation> operationPage =
+                balanceOperationRepository.findAll(
+                        BalanceOperationSpecification.withFilters(
+                                accountId,
+                                null,
+                                fromDate,
+                                toDate
+                        ),
+                        pageable
+                );
+
+        Page<BalanceOperationResponse> responsePage =
+                operationPage.map(
+                        BalanceOperationResponse::from
+                );
+
+        PageResponse<BalanceOperationResponse> operations =
+                new PageResponse<>(
+                        responsePage.getContent(),
+                        responsePage.getNumber(),
+                        responsePage.getSize(),
+                        responsePage.getTotalElements(),
+                        responsePage.getTotalPages(),
+                        responsePage.isFirst(),
+                        responsePage.isLast()
+                );
+
+        validateStatementBalanceEquation(
+                openingBalance,
+                totalCredits,
+                totalDebits,
+                closingBalance
+        );
+
+        log.info(
+                "Account statement generated. "
+                        + "accountId={}, fromDate={}, toDate={}, "
+                        + "openingBalance={}, closingBalance={}, "
+                        + "totalCredits={}, totalDebits={}, "
+                        + "creditCount={}, debitCount={}",
+                accountId,
+                fromDate,
+                toDate,
+                openingBalance,
+                closingBalance,
+                totalCredits,
+                totalDebits,
+                creditCount,
+                debitCount
+        );
+
+        return new AccountStatementResponse(
+                account.getAccountId(),
+                account.getAccountNumber(),
+                account.getAccountType().name(),
+                fromDate,
+                toDate,
+                openingBalance,
+                closingBalance,
+                totalCredits,
+                totalDebits,
+                creditCount,
+                debitCount,
+                operations
+        );
+    }
+
     private void validateBalanceHistoryRequest(
             Long accountId,
             LocalDateTime fromDate,
@@ -712,6 +880,118 @@ public class BalanceOperationService {
                 "Account not found with ID: "
                         + accountId
         );
+    }
+
+    private void validateStatementRequest(
+            Long accountId,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Pageable pageable) {
+
+        if (accountId == null || accountId <= 0) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Account ID must be greater than zero"
+            );
+        }
+
+        if (fromDate == null) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "fromDate is required"
+            );
+        }
+
+        if (toDate == null) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "toDate is required"
+            );
+        }
+
+        if (fromDate.isAfter(toDate)) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "fromDate must not be after toDate"
+            );
+        }
+
+        long statementPeriodDays =
+                ChronoUnit.DAYS.between(
+                        fromDate.toLocalDate(),
+                        toDate.toLocalDate()
+                );
+
+        if (statementPeriodDays > MAX_STATEMENT_PERIOD_DAYS) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Statement period must not exceed "
+                            + MAX_STATEMENT_PERIOD_DAYS
+                            + " days"
+            );
+        }
+
+        if (pageable == null) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Pagination information is required"
+            );
+        }
+    }
+
+    private BigDecimal determineOpeningBalance(
+            Optional<BalanceOperation> firstOperationInPeriod,
+            Optional<BalanceOperation> operationBeforePeriod) {
+
+        if (firstOperationInPeriod.isPresent()) {
+            return firstOperationInPeriod
+                    .get()
+                    .getBalanceBefore();
+        }
+
+        return operationBeforePeriod
+                .map(BalanceOperation::getBalanceAfter)
+                .orElse(BigDecimal.ZERO);
+    }
+
+    private BigDecimal defaultAmount(
+            BigDecimal amount) {
+
+        return amount == null
+                ? BigDecimal.ZERO
+                : amount;
+    }
+
+    private void validateStatementBalanceEquation(
+            BigDecimal openingBalance,
+            BigDecimal totalCredits,
+            BigDecimal totalDebits,
+            BigDecimal closingBalance) {
+
+        BigDecimal calculatedClosingBalance =
+                openingBalance
+                        .add(totalCredits)
+                        .subtract(totalDebits);
+
+        if (calculatedClosingBalance
+                .compareTo(closingBalance) != 0) {
+
+            log.error(
+                    "Account statement ledger mismatch. "
+                            + "openingBalance={}, totalCredits={}, "
+                            + "totalDebits={}, expectedClosingBalance={}, "
+                            + "actualClosingBalance={}",
+                    openingBalance,
+                    totalCredits,
+                    totalDebits,
+                    calculatedClosingBalance,
+                    closingBalance
+            );
+
+            throw new IllegalStateException(
+                    "Account statement ledger is inconsistent"
+            );
+        }
     }
 
 }
