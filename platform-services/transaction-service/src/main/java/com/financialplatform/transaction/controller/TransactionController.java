@@ -4,10 +4,13 @@ import com.financialplatform.common.response.ApiResponse;
 import com.financialplatform.common.response.PageResponse;
 import com.financialplatform.transaction.dto.TransactionRequest;
 import com.financialplatform.transaction.dto.TransactionResponse;
+import com.financialplatform.transaction.dto.TransactionStatusHistoryResponse;
 import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
+import com.financialplatform.transaction.entity.TransactionStatusHistory;
 import com.financialplatform.transaction.entity.TransactionType;
 import com.financialplatform.transaction.service.TransactionService;
+import com.financialplatform.transaction.service.TransactionStatusHistoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,21 +37,24 @@ import java.util.List;
         name = "Transaction Management",
         description = """
                 Transaction submission, execution, reconciliation,
-                history, filtering, and retrieval
+                audit history, filtering, and retrieval
                 """
 )
 public class TransactionController {
 
     private final TransactionService transactionService;
 
+    private final TransactionStatusHistoryService
+            transactionStatusHistoryService;
+
     // ============================================================
-    // All Transaction History
+    // Search Transactions
     // ============================================================
 
     @Operation(
-            summary = "Get all transaction history",
+            summary = "Search transactions",
             description = """
-                    Retrieves all transactions using optional transaction
+                    Retrieves transactions using optional transaction
                     type, status, and creation-date filters.
 
                     Results support pagination and sorting.
@@ -97,7 +103,7 @@ public class TransactionController {
             @RequestParam(defaultValue = "desc")
             String sortDir) {
 
-        return buildTransactionHistoryResponse(
+        return buildTransactionSearchResponse(
                 null,
                 null,
                 transactionType,
@@ -112,11 +118,11 @@ public class TransactionController {
     }
 
     // ============================================================
-    // Account Transaction History
+    // Account Transactions
     // ============================================================
 
     @Operation(
-            summary = "Get transaction history by account",
+            summary = "Get transactions by account",
             description = """
                     Retrieves transactions involving the specified account.
 
@@ -175,7 +181,7 @@ public class TransactionController {
             @RequestParam(defaultValue = "desc")
             String sortDir) {
 
-        return buildTransactionHistoryResponse(
+        return buildTransactionSearchResponse(
                 accountId,
                 null,
                 transactionType,
@@ -190,11 +196,11 @@ public class TransactionController {
     }
 
     // ============================================================
-    // Customer Transaction History
+    // Customer Transactions
     // ============================================================
 
     @Operation(
-            summary = "Get transaction history by customer",
+            summary = "Get transactions by customer",
             description = """
                     Retrieves transactions involving any account belonging
                     to the specified customer.
@@ -254,7 +260,7 @@ public class TransactionController {
             @RequestParam(defaultValue = "desc")
             String sortDir) {
 
-        return buildTransactionHistoryResponse(
+        return buildTransactionSearchResponse(
                 null,
                 customerId,
                 transactionType,
@@ -323,19 +329,24 @@ public class TransactionController {
                         request
                 );
 
-        TransactionResponse transactionResponse =
-                TransactionResponse.from(transaction);
-
         TransactionStatus transactionStatus =
                 transaction.getTransactionStatus();
 
         return ResponseEntity
-                .status(getSubmissionStatus(transactionStatus))
+                .status(
+                        getSubmissionStatus(
+                                transactionStatus
+                        )
+                )
                 .body(
                         new ApiResponse<>(
                                 true,
-                                getSubmissionMessage(transactionStatus),
-                                transactionResponse
+                                getSubmissionMessage(
+                                        transactionStatus
+                                ),
+                                TransactionResponse.from(
+                                        transaction
+                                )
                         )
                 );
     }
@@ -359,15 +370,66 @@ public class TransactionController {
             String transactionReference) {
 
         Transaction transaction =
-                transactionService.getTransactionByReference(
-                        transactionReference
-                );
+                transactionService
+                        .getTransactionByReference(
+                                transactionReference
+                        );
 
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
                         "Transaction retrieved successfully",
                         TransactionResponse.from(transaction)
+                )
+        );
+    }
+
+    // ============================================================
+    // Transaction Status Audit History
+    // ============================================================
+
+    @Operation(
+            summary = "Get transaction status history",
+            description = """
+                    Retrieves the complete ordered audit history for a
+                    transaction.
+
+                    The response includes the previous status, new status,
+                    transition source, reason, correlation ID, and
+                    transition timestamp.
+                    """
+    )
+    @GetMapping("/{transactionReference}/history")
+    public ResponseEntity<
+            ApiResponse<List<TransactionStatusHistoryResponse>>>
+    getTransactionStatusHistory(
+
+            @Parameter(
+                    description = "Unique transaction reference",
+                    required = true,
+                    example = "572c27e1-ac11-4b41-b407-36f4477034dc"
+            )
+            @PathVariable
+            String transactionReference) {
+
+        List<TransactionStatusHistory> history =
+                transactionStatusHistoryService
+                        .getTransactionHistory(
+                                transactionReference
+                        );
+
+        List<TransactionStatusHistoryResponse> response =
+                history.stream()
+                        .map(
+                                TransactionStatusHistoryResponse::from
+                        )
+                        .toList();
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        "Transaction status history retrieved successfully",
+                        response
                 )
         );
     }
@@ -396,33 +458,40 @@ public class TransactionController {
             String transactionReference) {
 
         Transaction transaction =
-                transactionService.reconcileTransaction(
-                        transactionReference
-                );
+                transactionService
+                        .reconcileTransaction(
+                                transactionReference
+                        );
 
         TransactionStatus transactionStatus =
                 transaction.getTransactionStatus();
 
         return ResponseEntity
-                .status(getReconciliationStatus(transactionStatus))
+                .status(
+                        getReconciliationStatus(
+                                transactionStatus
+                        )
+                )
                 .body(
                         new ApiResponse<>(
                                 true,
                                 getReconciliationMessage(
                                         transactionStatus
                                 ),
-                                TransactionResponse.from(transaction)
+                                TransactionResponse.from(
+                                        transaction
+                                )
                         )
                 );
     }
 
     // ============================================================
-    // Transaction History Response Builder
+    // Transaction Search Response Builder
     // ============================================================
 
     private ResponseEntity<
             ApiResponse<PageResponse<TransactionResponse>>>
-    buildTransactionHistoryResponse(
+    buildTransactionSearchResponse(
 
             Long accountId,
             Long customerId,
@@ -450,7 +519,8 @@ public class TransactionController {
                 );
 
         List<TransactionResponse> content =
-                transactionPage.getContent()
+                transactionPage
+                        .getContent()
                         .stream()
                         .map(TransactionResponse::from)
                         .toList();

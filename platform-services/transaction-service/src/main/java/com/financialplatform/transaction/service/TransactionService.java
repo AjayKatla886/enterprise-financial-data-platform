@@ -5,6 +5,7 @@ import com.financialplatform.transaction.client.AccountClient;
 import com.financialplatform.transaction.dto.TransactionRequest;
 import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
+import com.financialplatform.transaction.entity.TransactionTransitionSource;
 import com.financialplatform.transaction.entity.TransactionType;
 import com.financialplatform.transaction.exception.AccountServiceUnavailableException;
 import com.financialplatform.transaction.exception.TransactionBusinessException;
@@ -51,6 +52,9 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
     private final AccountClient accountClient;
 
+    private final TransactionStatusTransitionService
+            transactionStatusTransitionService;
+
     public Page<Transaction> getTransactions(
             Long accountId,
             Long customerId,
@@ -88,9 +92,6 @@ public class TransactionService {
 
         if (accountId != null) {
 
-            /*
-             * Confirms that the requested account exists.
-             */
             accountClient.getAccountById(accountId);
 
             accountIds = List.of(accountId);
@@ -98,13 +99,6 @@ public class TransactionService {
 
         if (customerId != null) {
 
-            /*
-             * Transaction Service does not own the relationship
-             * between customers and accounts.
-             *
-             * Account Service is called to retrieve all accounts
-             * belonging to the requested customer.
-             */
             accountIds =
                     accountClient
                             .getAccountsByCustomerId(customerId)
@@ -116,12 +110,6 @@ public class TransactionService {
                             .distinct()
                             .toList();
 
-            /*
-             * An existing customer may have no accounts.
-             *
-             * Returning an empty page prevents an empty account-ID
-             * collection from being interpreted as no account filter.
-             */
             if (accountIds.isEmpty()) {
                 return Page.empty(pageRequest);
             }
@@ -181,8 +169,7 @@ public class TransactionService {
         if (!ALLOWED_SORT_FIELDS.contains(sortBy)) {
             throw new TransactionBusinessException(
                     ErrorCode.INVALID_REQUEST,
-                    "Unsupported transaction sort field: "
-                            + sortBy
+                    "Unsupported transaction sort field: " + sortBy
             );
         }
 
@@ -221,13 +208,6 @@ public class TransactionService {
                             requestHash
                     );
 
-            /*
-             * Only a PENDING transaction can be automatically resumed.
-             *
-             * PROCESSING and RECONCILIATION_REQUIRED transactions may
-             * already have changed an account balance. They must not be
-             * executed automatically again.
-             */
             if (idempotentTransaction.getTransactionStatus()
                     == TransactionStatus.PENDING) {
 
@@ -239,18 +219,9 @@ public class TransactionService {
             return idempotentTransaction;
         }
 
-        /*
-         * Validate referenced accounts before recording a new
-         * transaction.
-         *
-         * If Account Service is unavailable during validation,
-         * no transaction has been created and a 503 response can
-         * safely be returned.
-         */
         validateReferencedAccounts(request);
 
-        LocalDateTime now =
-                LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
 
         Transaction transaction =
                 Transaction.builder()
@@ -292,11 +263,17 @@ public class TransactionService {
         try {
 
             /*
-             * First save records the transaction as PENDING.
+             * The transaction and its initial null -> PENDING
+             * history record are committed together.
              */
             savedTransaction =
-                    transactionRepository
-                            .saveAndFlush(transaction);
+                    transactionStatusTransitionService
+                            .saveInitialTransaction(
+                                    transaction,
+                                    TransactionTransitionSource
+                                            .TRANSACTION_SUBMISSION,
+                                    "Transaction request recorded"
+                            );
 
             log.info(
                     "Transaction request recorded. "
@@ -310,11 +287,8 @@ public class TransactionService {
         } catch (DataIntegrityViolationException ex) {
 
             /*
-             * Two simultaneous requests may use the same
-             * Idempotency-Key.
-             *
-             * The database unique constraint allows only one
-             * transaction record.
+             * The unique database constraint protects against two
+             * simultaneous requests using the same idempotency key.
              */
             Transaction concurrentTransaction =
                     transactionRepository
@@ -357,9 +331,7 @@ public class TransactionService {
                 transactionReference.trim();
 
         return transactionRepository
-                .findByTransactionReference(
-                        normalizedReference
-                )
+                .findByTransactionReference(normalizedReference)
                 .orElseThrow(() ->
                         new TransactionBusinessException(
                                 ErrorCode.TRANSACTION_NOT_FOUND,
@@ -372,26 +344,31 @@ public class TransactionService {
     public Transaction reconcileTransaction(
             String transactionReference) {
 
+        return reconcileTransaction(
+                transactionReference,
+                TransactionTransitionSource.RECONCILIATION_API
+        );
+    }
+
+    public Transaction reconcileTransaction(
+            String transactionReference,
+            TransactionTransitionSource source) {
+
         Transaction transaction =
                 getTransactionByReference(
                         transactionReference
                 );
 
-        /*
-         * Final states require no reconciliation.
-         */
         if (transaction.getTransactionStatus()
                 == TransactionStatus.COMPLETED
                 || transaction.getTransactionStatus()
-                == TransactionStatus.FAILED) {
+                == TransactionStatus.FAILED
+                || transaction.getTransactionStatus()
+                == TransactionStatus.MANUAL_REVIEW) {
 
             return transaction;
         }
 
-        /*
-         * PENDING means processing never started, so it should not be
-         * reconciled against the Account Service ledger.
-         */
         if (transaction.getTransactionStatus()
                 == TransactionStatus.PENDING) {
 
@@ -418,21 +395,24 @@ public class TransactionService {
                 );
 
                 return markTransactionCompleted(
-                        transaction
+                        transaction,
+                        source
                 );
             }
 
             return markTransactionForReconciliation(
                     transaction,
                     "Account balance operation was not found; "
-                            + "manual reconciliation is still required"
+                            + "manual reconciliation is still required",
+                    source
             );
 
         } catch (AccountServiceUnavailableException ex) {
 
             return markTransactionForReconciliation(
                     transaction,
-                    ex.getMessage()
+                    ex.getMessage(),
+                    source
             );
         }
     }
@@ -466,10 +446,9 @@ public class TransactionService {
             Transaction transaction) {
 
         /*
-         * Persist PROCESSING before calling Account Service.
-         *
-         * If Transaction Service stops after this save, the
-         * transaction can later be identified for reconciliation.
+         * PROCESSING is committed before calling Account Service.
+         * If the service stops after this point, reconciliation can
+         * safely identify the unresolved transaction.
          */
         markTransactionProcessing(transaction);
 
@@ -490,24 +469,19 @@ public class TransactionService {
         } catch (AccountServiceUnavailableException ex) {
 
             /*
-             * Account Service might have committed the balance
-             * operation before the HTTP response was lost.
-             *
-             * The result is uncertain, so the transaction must not
-             * be marked FAILED or automatically executed again.
+             * Account Service may have committed the operation before
+             * its HTTP response was lost. Therefore, the transaction
+             * outcome is uncertain and requires reconciliation.
              */
             return markTransactionForReconciliation(
                     transaction,
-                    ex.getMessage()
+                    ex.getMessage(),
+                    TransactionTransitionSource
+                            .TRANSACTION_PROCESSOR
             );
 
         } catch (RuntimeException ex) {
 
-            /*
-             * Confirmed business failures, such as insufficient
-             * funds or an inactive account, can safely be marked
-             * FAILED.
-             */
             markTransactionFailed(
                     transaction,
                     ex.getMessage()
@@ -516,7 +490,10 @@ public class TransactionService {
             throw ex;
         }
 
-        return markTransactionCompleted(transaction);
+        return markTransactionCompleted(
+                transaction,
+                TransactionTransitionSource.TRANSACTION_PROCESSOR
+        );
     }
 
     private void executeDeposit(
@@ -563,8 +540,8 @@ public class TransactionService {
                         + "-transfer";
 
         /*
-         * Account Service executes the source debit, target credit
-         * and both ledger inserts in one local database transaction.
+         * Account Service performs the debit, credit and ledger
+         * inserts in one local database transaction.
          */
         accountClient.applyTransfer(
                 operationReference,
@@ -580,18 +557,14 @@ public class TransactionService {
     private void markTransactionProcessing(
             Transaction transaction) {
 
-        transaction.setTransactionStatus(
-                TransactionStatus.PROCESSING
-        );
-
         transaction.setFailureReason(null);
 
-        transaction.setUpdatedAt(
-                LocalDateTime.now()
+        transactionStatusTransitionService.transition(
+                transaction,
+                TransactionStatus.PROCESSING,
+                TransactionTransitionSource.TRANSACTION_PROCESSOR,
+                "Transaction execution started"
         );
-
-        transactionRepository
-                .saveAndFlush(transaction);
 
         log.info(
                 "Transaction processing started. "
@@ -603,21 +576,18 @@ public class TransactionService {
     }
 
     private Transaction markTransactionCompleted(
-            Transaction transaction) {
-
-        transaction.setTransactionStatus(
-                TransactionStatus.COMPLETED
-        );
+            Transaction transaction,
+            TransactionTransitionSource source) {
 
         transaction.setFailureReason(null);
 
-        transaction.setUpdatedAt(
-                LocalDateTime.now()
-        );
-
         Transaction completedTransaction =
-                transactionRepository
-                        .saveAndFlush(transaction);
+                transactionStatusTransitionService.transition(
+                        transaction,
+                        TransactionStatus.COMPLETED,
+                        source,
+                        "Transaction completed successfully"
+                );
 
         log.info(
                 "Transaction completed successfully. "
@@ -634,22 +604,19 @@ public class TransactionService {
             Transaction transaction,
             String failureReason) {
 
-        transaction.setTransactionStatus(
-                TransactionStatus.FAILED
-        );
-
-        transaction.setFailureReason(
+        String normalizedReason =
                 normalizeFailureReason(
                         failureReason
-                )
-        );
+                );
 
-        transaction.setUpdatedAt(
-                LocalDateTime.now()
-        );
+        transaction.setFailureReason(normalizedReason);
 
-        transactionRepository
-                .saveAndFlush(transaction);
+        transactionStatusTransitionService.transition(
+                transaction,
+                TransactionStatus.FAILED,
+                TransactionTransitionSource.TRANSACTION_PROCESSOR,
+                normalizedReason
+        );
 
         log.warn(
                 "Transaction failed. "
@@ -662,25 +629,23 @@ public class TransactionService {
 
     private Transaction markTransactionForReconciliation(
             Transaction transaction,
-            String failureReason) {
+            String failureReason,
+            TransactionTransitionSource source) {
 
-        transaction.setTransactionStatus(
-                TransactionStatus.RECONCILIATION_REQUIRED
-        );
-
-        transaction.setFailureReason(
+        String normalizedReason =
                 normalizeFailureReason(
                         failureReason
-                )
-        );
+                );
 
-        transaction.setUpdatedAt(
-                LocalDateTime.now()
-        );
+        transaction.setFailureReason(normalizedReason);
 
         Transaction reconciliationTransaction =
-                transactionRepository
-                        .saveAndFlush(transaction);
+                transactionStatusTransitionService.transition(
+                        transaction,
+                        TransactionStatus.RECONCILIATION_REQUIRED,
+                        source,
+                        normalizedReason
+                );
 
         log.error(
                 "Transaction requires reconciliation. "
@@ -697,14 +662,12 @@ public class TransactionService {
             TransactionRequest request) {
 
         if (request.sourceAccountId() != null) {
-
             validateActiveAccount(
                     request.sourceAccountId()
             );
         }
 
         if (request.targetAccountId() != null) {
-
             validateActiveAccount(
                     request.targetAccountId()
             );
@@ -886,8 +849,7 @@ public class TransactionService {
             Long accountId) {
 
         AccountClient.AccountLookupResponse account =
-                accountClient
-                        .getAccountById(accountId);
+                accountClient.getAccountById(accountId);
 
         if (!"ACTIVE".equalsIgnoreCase(
                 account.accountStatus())) {

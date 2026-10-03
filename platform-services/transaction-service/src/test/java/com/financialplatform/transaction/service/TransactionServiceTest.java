@@ -5,10 +5,12 @@ import com.financialplatform.transaction.client.AccountClient;
 import com.financialplatform.transaction.dto.TransactionRequest;
 import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
+import com.financialplatform.transaction.entity.TransactionTransitionSource;
 import com.financialplatform.transaction.entity.TransactionType;
 import com.financialplatform.transaction.exception.AccountServiceUnavailableException;
 import com.financialplatform.transaction.exception.TransactionBusinessException;
 import com.financialplatform.transaction.repository.TransactionRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -35,6 +37,9 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class TransactionServiceTest {
 
+    @Mock
+    private TransactionStatusTransitionService transactionStatusTransitionService;
+
     private static final String IDEMPOTENCY_KEY =
             "transaction-request-001";
 
@@ -46,6 +51,57 @@ class TransactionServiceTest {
 
     @InjectMocks
     private TransactionService transactionService;
+
+    @BeforeEach
+    void setUpStatusTransitionService() {
+
+        /*
+         * Simulates saving the initial transaction through the
+         * TransactionStatusTransitionService.
+         *
+         * Calling transactionRepository.saveAndFlush() here preserves
+         * the behavior expected by the existing TransactionService tests.
+         */
+        lenient().when(
+                transactionStatusTransitionService
+                        .saveInitialTransaction(
+                                any(Transaction.class),
+                                any(TransactionTransitionSource.class),
+                                nullable(String.class)
+                        )
+        ).thenAnswer(invocation -> {
+
+            Transaction transaction =
+                    invocation.getArgument(0);
+
+            return transactionRepository.saveAndFlush(transaction);
+        });
+
+        /*
+         * Simulates a status transition and delegates persistence to
+         * the mocked repository.
+         */
+        lenient().when(
+                transactionStatusTransitionService.transition(
+                        any(Transaction.class),
+                        any(TransactionStatus.class),
+                        any(TransactionTransitionSource.class),
+                        nullable(String.class)
+                )
+        ).thenAnswer(invocation -> {
+
+            Transaction transaction =
+                    invocation.getArgument(0);
+
+            TransactionStatus newStatus =
+                    invocation.getArgument(1);
+
+            transaction.setTransactionStatus(newStatus);
+            transaction.setUpdatedAt(LocalDateTime.now());
+
+            return transactionRepository.saveAndFlush(transaction);
+        });
+    }
 
     @Test
     void shouldProcessDepositAsCompleted() {
