@@ -2,6 +2,7 @@ package com.financialplatform.transaction.service;
 
 import com.financialplatform.common.exception.ErrorCode;
 import com.financialplatform.transaction.client.AccountClient;
+import com.financialplatform.transaction.dto.ManualReviewResolutionRequest;
 import com.financialplatform.transaction.dto.TransactionRequest;
 import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
@@ -18,6 +19,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -811,6 +813,131 @@ public class TransactionService {
         }
 
         return description.trim();
+    }
+
+    @Transactional
+    public Transaction resolveManualReview(
+            String transactionReference,
+            ManualReviewResolutionRequest request) {
+
+        String normalizedReference =
+                normalizeTransactionReference(
+                        transactionReference
+                );
+
+        if (request == null) {
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Manual review resolution request is required"
+            );
+        }
+
+        TransactionStatus resolutionStatus =
+                request.resolutionStatus();
+
+        if (resolutionStatus != TransactionStatus.COMPLETED
+                && resolutionStatus != TransactionStatus.FAILED) {
+
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Manual review can only be resolved as COMPLETED or FAILED"
+            );
+        }
+
+        String reason =
+                normalizeManualReviewReason(
+                        request.reason()
+                );
+
+        Transaction transaction =
+                transactionRepository
+                        .findByTransactionReferenceForUpdate(
+                                normalizedReference
+                        )
+                        .orElseThrow(() ->
+                                new TransactionBusinessException(
+                                        ErrorCode.TRANSACTION_NOT_FOUND,
+                                        "Transaction not found with reference: "
+                                                + normalizedReference
+                                )
+                        );
+
+        if (transaction.getTransactionStatus()
+                != TransactionStatus.MANUAL_REVIEW) {
+
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Only a transaction in MANUAL_REVIEW status can be resolved"
+            );
+        }
+
+        if (resolutionStatus == TransactionStatus.FAILED) {
+            transaction.setFailureReason(reason);
+        } else {
+            transaction.setFailureReason(null);
+        }
+
+        Transaction resolvedTransaction =
+                transactionStatusTransitionService.transition(
+                        transaction,
+                        resolutionStatus,
+                        TransactionTransitionSource.MANUAL_REVIEW,
+                        reason
+                );
+
+        log.info(
+                "Manual review resolved. transactionId={}, "
+                        + "reference={}, finalStatus={}",
+                resolvedTransaction.getTransactionId(),
+                resolvedTransaction.getTransactionReference(),
+                resolvedTransaction.getTransactionStatus()
+        );
+
+        return resolvedTransaction;
+    }
+
+    private String normalizeTransactionReference(
+            String transactionReference) {
+
+        if (transactionReference == null
+                || transactionReference.isBlank()) {
+
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Transaction reference is required"
+            );
+        }
+
+        return transactionReference.trim();
+    }
+
+    private String normalizeManualReviewReason(
+            String reason) {
+
+        if (reason == null
+                || reason.isBlank()) {
+
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Manual review reason is required"
+            );
+        }
+
+        String normalizedReason =
+                reason.trim();
+
+        if (normalizedReason.length()
+                > MAX_FAILURE_REASON_LENGTH) {
+
+            throw new TransactionBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Manual review reason must not exceed "
+                            + MAX_FAILURE_REASON_LENGTH
+                            + " characters"
+            );
+        }
+
+        return normalizedReason;
     }
 
     private String normalizeFailureReason(

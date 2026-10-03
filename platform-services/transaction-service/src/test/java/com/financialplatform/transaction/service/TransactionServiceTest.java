@@ -22,6 +22,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import com.financialplatform.transaction.dto.ManualReviewResolutionRequest;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -1555,5 +1556,279 @@ class TransactionServiceTest {
                 .createdAt(java.time.LocalDateTime.now())
                 .updatedAt(java.time.LocalDateTime.now())
                 .build();
+    }
+    private Transaction manualReviewTransaction(
+            String transactionReference) {
+
+        LocalDateTime now =
+                LocalDateTime.now();
+
+        return Transaction.builder()
+                .transactionId(67L)
+                .transactionReference(transactionReference)
+                .idempotencyKey("day23-manual-review-001")
+                .requestHash("day23-request-hash")
+                .transactionType(TransactionType.DEPOSIT)
+                .targetAccountId(21L)
+                .amount(new BigDecimal("25.00"))
+                .currency("USD")
+                .transactionStatus(
+                        TransactionStatus.MANUAL_REVIEW
+                )
+                .failureReason(
+                        "Automatic reconciliation attempts exhausted"
+                )
+                .description(
+                        "Day 23 manual-review test"
+                )
+                .createdAt(now.minusMinutes(10))
+                .updatedAt(now)
+                .build();
+    }
+    @Test
+    void shouldResolveManualReviewAsCompleted() {
+
+        String reference =
+                "29700518-4f18-4e88-b83a-84781c376013";
+
+        Transaction transaction =
+                manualReviewTransaction(reference);
+
+        ManualReviewResolutionRequest request =
+                new ManualReviewResolutionRequest(
+                        TransactionStatus.COMPLETED,
+                        "Account ledger confirms completion"
+                );
+
+        when(transactionRepository
+                .findByTransactionReferenceForUpdate(reference))
+                .thenReturn(Optional.of(transaction));
+
+        when(transactionRepository.saveAndFlush(transaction))
+                .thenReturn(transaction);
+
+        Transaction result =
+                transactionService.resolveManualReview(
+                        reference,
+                        request
+                );
+
+        assertSame(transaction, result);
+
+        assertEquals(
+                TransactionStatus.COMPLETED,
+                result.getTransactionStatus()
+        );
+
+        assertNull(result.getFailureReason());
+
+        verify(transactionStatusTransitionService)
+                .transition(
+                        transaction,
+                        TransactionStatus.COMPLETED,
+                        TransactionTransitionSource.MANUAL_REVIEW,
+                        "Account ledger confirms completion"
+                );
+    }
+
+    @Test
+    void shouldResolveManualReviewAsFailed() {
+
+        String reference =
+                "29700518-4f18-4e88-b83a-84781c376013";
+
+        Transaction transaction =
+                manualReviewTransaction(reference);
+
+        ManualReviewResolutionRequest request =
+                new ManualReviewResolutionRequest(
+                        TransactionStatus.FAILED,
+                        "No balance operation was completed"
+                );
+
+        when(transactionRepository
+                .findByTransactionReferenceForUpdate(reference))
+                .thenReturn(Optional.of(transaction));
+
+        when(transactionRepository.saveAndFlush(transaction))
+                .thenReturn(transaction);
+
+        Transaction result =
+                transactionService.resolveManualReview(
+                        reference,
+                        request
+                );
+
+        assertEquals(
+                TransactionStatus.FAILED,
+                result.getTransactionStatus()
+        );
+
+        assertEquals(
+                "No balance operation was completed",
+                result.getFailureReason()
+        );
+
+        verify(transactionStatusTransitionService)
+                .transition(
+                        transaction,
+                        TransactionStatus.FAILED,
+                        TransactionTransitionSource.MANUAL_REVIEW,
+                        "No balance operation was completed"
+                );
+    }
+
+    @Test
+    void shouldRejectManualReviewResolutionForNonManualTransaction() {
+
+        String reference =
+                "29700518-4f18-4e88-b83a-84781c376013";
+
+        Transaction transaction =
+                manualReviewTransaction(reference);
+
+        transaction.setTransactionStatus(
+                TransactionStatus.PROCESSING
+        );
+
+        ManualReviewResolutionRequest request =
+                new ManualReviewResolutionRequest(
+                        TransactionStatus.COMPLETED,
+                        "Operation completed"
+                );
+
+        when(transactionRepository
+                .findByTransactionReferenceForUpdate(reference))
+                .thenReturn(Optional.of(transaction));
+
+        TransactionBusinessException exception =
+                assertThrows(
+                        TransactionBusinessException.class,
+                        () -> transactionService
+                                .resolveManualReview(
+                                        reference,
+                                        request
+                                )
+                );
+
+        assertEquals(
+                ErrorCode.INVALID_REQUEST,
+                exception.getErrorCode()
+        );
+
+        assertEquals(
+                "Only a transaction in MANUAL_REVIEW status can be resolved",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(
+                transactionStatusTransitionService
+        );
+    }
+
+    @Test
+    void shouldRejectUnsupportedManualReviewStatus() {
+
+        ManualReviewResolutionRequest request =
+                new ManualReviewResolutionRequest(
+                        TransactionStatus.PROCESSING,
+                        "Unsupported resolution"
+                );
+
+        TransactionBusinessException exception =
+                assertThrows(
+                        TransactionBusinessException.class,
+                        () -> transactionService
+                                .resolveManualReview(
+                                        "29700518-4f18-4e88-b83a-84781c376013",
+                                        request
+                                )
+                );
+
+        assertEquals(
+                ErrorCode.INVALID_REQUEST,
+                exception.getErrorCode()
+        );
+
+        assertEquals(
+                "Manual review can only be resolved as COMPLETED or FAILED",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(transactionRepository);
+        verifyNoInteractions(
+                transactionStatusTransitionService
+        );
+    }
+
+    @Test
+    void shouldRejectBlankManualReviewReason() {
+
+        ManualReviewResolutionRequest request =
+                new ManualReviewResolutionRequest(
+                        TransactionStatus.COMPLETED,
+                        "   "
+                );
+
+        TransactionBusinessException exception =
+                assertThrows(
+                        TransactionBusinessException.class,
+                        () -> transactionService
+                                .resolveManualReview(
+                                        "29700518-4f18-4e88-b83a-84781c376013",
+                                        request
+                                )
+                );
+
+        assertEquals(
+                ErrorCode.INVALID_REQUEST,
+                exception.getErrorCode()
+        );
+
+        assertEquals(
+                "Manual review reason is required",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(transactionRepository);
+        verifyNoInteractions(
+                transactionStatusTransitionService
+        );
+    }
+
+    @Test
+    void shouldRejectMissingManualReviewTransaction() {
+
+        String reference =
+                "00000000-0000-0000-0000-000000000000";
+
+        ManualReviewResolutionRequest request =
+                new ManualReviewResolutionRequest(
+                        TransactionStatus.COMPLETED,
+                        "Operation completed"
+                );
+
+        when(transactionRepository
+                .findByTransactionReferenceForUpdate(reference))
+                .thenReturn(Optional.empty());
+
+        TransactionBusinessException exception =
+                assertThrows(
+                        TransactionBusinessException.class,
+                        () -> transactionService
+                                .resolveManualReview(
+                                        reference,
+                                        request
+                                )
+                );
+
+        assertEquals(
+                ErrorCode.TRANSACTION_NOT_FOUND,
+                exception.getErrorCode()
+        );
+
+        verifyNoInteractions(
+                transactionStatusTransitionService
+        );
     }
 }

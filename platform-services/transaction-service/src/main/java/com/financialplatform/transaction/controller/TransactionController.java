@@ -25,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import com.financialplatform.transaction.dto.ManualReviewResolutionRequest;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -114,6 +115,49 @@ public class TransactionController {
                 size,
                 sortBy,
                 sortDir
+        );
+    }
+
+    @Operation(
+            summary = "Resolve a transaction under manual review",
+            description = """
+                Resolves a transaction currently in MANUAL_REVIEW status.
+
+                The final status must be COMPLETED or FAILED. The supplied
+                reason is recorded in the transaction status audit history.
+                """
+    )
+    @PostMapping("/{transactionReference}/manual-review")
+    public ResponseEntity<ApiResponse<TransactionResponse>>
+    resolveManualReview(
+
+            @Parameter(
+                    description = "Unique transaction reference",
+                    required = true,
+                    example = "29700518-4f18-4e88-b83a-84781c376013"
+            )
+            @PathVariable
+            String transactionReference,
+
+            @Valid
+            @RequestBody
+            ManualReviewResolutionRequest request) {
+
+        Transaction transaction =
+                transactionService.resolveManualReview(
+                        transactionReference,
+                        request
+                );
+
+        TransactionResponse transactionResponse =
+                TransactionResponse.from(transaction);
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        "Manual review resolved successfully",
+                        transactionResponse
+                )
         );
     }
 

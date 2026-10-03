@@ -2,9 +2,11 @@ package com.financialplatform.transaction.repository;
 
 import com.financialplatform.transaction.entity.Transaction;
 import com.financialplatform.transaction.entity.TransactionStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -23,6 +25,18 @@ public interface TransactionRepository
 
     Optional<Transaction> findByIdempotencyKey(
             String idempotencyKey
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT transaction
+            FROM Transaction transaction
+            WHERE transaction.transactionReference =
+                  :transactionReference
+            """)
+    Optional<Transaction> findByTransactionReferenceForUpdate(
+            @Param("transactionReference")
+            String transactionReference
     );
 
     @Query("""
