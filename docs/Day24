@@ -1,0 +1,170 @@
+# Day 24 Notes — Account Balance History API
+
+## Goal
+
+Day 24 implemented a read-only API for retrieving an account’s debit, credit, and reversal history with filtering and pagination.
+
+## Endpoint
+
+```http
+GET /api/v1/accounts/{accountId}/balance-operations
+```
+
+Example:
+
+```http
+GET /api/v1/accounts/21/balance-operations?page=0&size=20
+```
+
+Filtered example:
+
+```http
+GET /api/v1/accounts/21/balance-operations?operationType=DEBIT&fromDate=2026-09-01T00:00:00&toDate=2026-10-03T23:59:59&page=0&size=20
+```
+
+## Changes Implemented
+
+### Repository enhancement
+
+`BalanceOperationRepository` now extends:
+
+```java
+JpaSpecificationExecutor<BalanceOperation>
+```
+
+This supports dynamic database queries using optional filters.
+
+### Dynamic specifications
+
+Created:
+
+```text
+BalanceOperationSpecification.java
+```
+
+It supports:
+
+- Required `accountId`
+- Optional `operationType`
+- Optional `fromDate`
+- Optional `toDate`
+
+Only supplied filters are included in the generated query.
+
+### Service enhancement
+
+Added:
+
+```java
+getAccountBalanceOperations(...)
+```
+
+The service:
+
+- Validates the account ID.
+- Validates that `fromDate` is not after `toDate`.
+- Confirms the account exists.
+- Queries balance operations with dynamic filters.
+- Converts entities into response DTOs.
+- Returns pagination metadata.
+- Uses `@Transactional(readOnly = true)`.
+
+### Public controller
+
+Created:
+
+```text
+AccountBalanceHistoryController.java
+```
+
+The public history endpoint is separated from the internal balance-modification controller.
+
+```text
+/api/v1/accounts/**          → Read-only account history
+/internal/api/v1/accounts/** → Debit, credit and transfer operations
+```
+
+This maintains a safer API boundary.
+
+## Sorting
+
+Results use stable newest-first sorting:
+
+```text
+createdAt DESC
+balanceOperationId DESC
+```
+
+The ID acts as a tie-breaker when multiple operations have the same timestamp.
+
+## Pagination
+
+Supported parameters:
+
+| Parameter | Default | Validation |
+|---|---:|---|
+| `page` | `0` | Must not be negative |
+| `size` | `20` | Between `1` and `100` |
+
+The response contains:
+
+- `content`
+- `page`
+- `size`
+- `totalElements`
+- `totalPages`
+- `first`
+- `last`
+
+## Validation and Errors
+
+Handled scenarios:
+
+- Invalid account ID
+- Account not found
+- Invalid date range
+- Invalid operation type
+- Invalid page number
+- Invalid page size
+- Existing account with no history
+
+Example invalid date response:
+
+```json
+{
+  "success": false,
+  "errorCode": "VAL-002",
+  "message": "fromDate must not be after toDate",
+  "path": "/api/v1/accounts/21/balance-operations"
+}
+```
+
+## Testing
+
+Unit tests cover:
+
+- Paginated balance history
+- Newest-first results
+- Operation-type and date filters
+- Empty history for an existing account
+- Missing account
+- Invalid account ID
+- Invalid date range
+- Pagination metadata
+
+Swagger testing confirmed account `21` returned its three debit operations correctly.
+
+## Important Concepts Learned
+
+- Spring Data JPA `Specification`
+- Dynamic query composition
+- Pagination with `Pageable`
+- Stable database sorting
+- Entity-to-DTO conversion
+- Read-only transactions
+- Public versus internal API separation
+- Ledger-based account history
+
+## Day 24 Outcome
+
+The Account Service now provides a production-style, searchable, paginated ledger history without exposing internal money-movement operations.

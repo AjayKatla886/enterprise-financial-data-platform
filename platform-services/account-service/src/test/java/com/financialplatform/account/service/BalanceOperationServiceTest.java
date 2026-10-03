@@ -3,6 +3,7 @@ package com.financialplatform.account.service;
 import com.financialplatform.account.dto.AccountTransferRequest;
 import com.financialplatform.account.dto.AccountTransferResponse;
 import com.financialplatform.account.dto.BalanceOperationRequest;
+import com.financialplatform.account.dto.BalanceOperationResponse;
 import com.financialplatform.account.entity.Account;
 import com.financialplatform.account.entity.AccountStatus;
 import com.financialplatform.account.entity.AccountType;
@@ -12,15 +13,22 @@ import com.financialplatform.account.exception.AccountBusinessException;
 import com.financialplatform.account.repository.AccountRepository;
 import com.financialplatform.account.repository.BalanceOperationRepository;
 import com.financialplatform.common.exception.ErrorCode;
+import com.financialplatform.common.response.PageResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -846,5 +854,319 @@ class BalanceOperationServiceTest {
 
         verifyNoInteractions(accountRepository);
         verifyNoInteractions(balanceOperationRepository);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnPaginatedBalanceHistory() {
+
+        Pageable pageable = PageRequest.of(
+                0,
+                20,
+                Sort.by(Sort.Direction.DESC, "createdAt")
+                        .and(Sort.by(
+                                Sort.Direction.DESC,
+                                "balanceOperationId"
+                        ))
+        );
+
+        BalanceOperation newestOperation = historyOperation(
+                2L,
+                "history-credit-002",
+                BalanceOperationType.CREDIT,
+                "50.00",
+                "100.00",
+                "150.00",
+                LocalDateTime.of(2026, 10, 2, 14, 30)
+        );
+
+        BalanceOperation olderOperation = historyOperation(
+                1L,
+                "history-debit-001",
+                BalanceOperationType.DEBIT,
+                "25.00",
+                "125.00",
+                "100.00",
+                LocalDateTime.of(2026, 10, 1, 10, 15)
+        );
+
+        when(accountRepository.existsById(21L))
+                .thenReturn(true);
+
+        when(balanceOperationRepository.findAll(
+                any(Specification.class),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(
+                List.of(newestOperation, olderOperation),
+                pageable,
+                2
+        ));
+
+        PageResponse<BalanceOperationResponse> result =
+                balanceOperationService.getAccountBalanceOperations(
+                        21L,
+                        null,
+                        null,
+                        null,
+                        pageable
+                );
+
+        assertEquals(2, result.content().size());
+        assertEquals(0, result.page());
+        assertEquals(20, result.size());
+        assertEquals(2L, result.totalElements());
+        assertEquals(1, result.totalPages());
+        assertTrue(result.first());
+        assertTrue(result.last());
+        assertEquals(
+                2L,
+                result.content().get(0).balanceOperationId()
+        );
+        assertEquals(
+                "history-credit-002",
+                result.content().get(0).operationReference()
+        );
+        assertEquals(
+                "CREDIT",
+                result.content().get(0).operationType()
+        );
+
+        verify(accountRepository).existsById(21L);
+        verify(balanceOperationRepository).findAll(
+                any(Specification.class),
+                eq(pageable)
+        );
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldApplyOperationTypeAndDateFilters() {
+
+        LocalDateTime fromDate =
+                LocalDateTime.of(2026, 9, 1, 0, 0);
+
+        LocalDateTime toDate =
+                LocalDateTime.of(2026, 9, 30, 23, 59, 59);
+
+        Pageable pageable = PageRequest.of(
+                0,
+                10,
+                Sort.by(Sort.Direction.DESC, "createdAt")
+        );
+
+        BalanceOperation debitOperation = historyOperation(
+                10L,
+                "filtered-debit-001",
+                BalanceOperationType.DEBIT,
+                "100.00",
+                "500.00",
+                "400.00",
+                LocalDateTime.of(2026, 9, 15, 12, 0)
+        );
+
+        when(accountRepository.existsById(21L))
+                .thenReturn(true);
+
+        when(balanceOperationRepository.findAll(
+                any(Specification.class),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(
+                List.of(debitOperation),
+                pageable,
+                1
+        ));
+
+        PageResponse<BalanceOperationResponse> result =
+                balanceOperationService.getAccountBalanceOperations(
+                        21L,
+                        BalanceOperationType.DEBIT,
+                        fromDate,
+                        toDate,
+                        pageable
+                );
+
+        assertEquals(1, result.content().size());
+        assertEquals(
+                "DEBIT",
+                result.content().get(0).operationType()
+        );
+        assertEquals(
+                "filtered-debit-001",
+                result.content().get(0).operationReference()
+        );
+
+        verify(accountRepository).existsById(21L);
+        verify(balanceOperationRepository).findAll(
+                any(Specification.class),
+                eq(pageable)
+        );
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnEmptyHistoryForExistingAccount() {
+
+        Pageable pageable = PageRequest.of(0, 20);
+
+        when(accountRepository.existsById(21L))
+                .thenReturn(true);
+
+        when(balanceOperationRepository.findAll(
+                any(Specification.class),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(
+                List.of(),
+                pageable,
+                0
+        ));
+
+        PageResponse<BalanceOperationResponse> result =
+                balanceOperationService.getAccountBalanceOperations(
+                        21L,
+                        null,
+                        null,
+                        null,
+                        pageable
+                );
+
+        assertTrue(result.content().isEmpty());
+        assertEquals(0L, result.totalElements());
+        assertEquals(0, result.totalPages());
+        assertTrue(result.first());
+        assertTrue(result.last());
+
+        verify(accountRepository).existsById(21L);
+        verify(balanceOperationRepository).findAll(
+                any(Specification.class),
+                eq(pageable)
+        );
+    }
+
+    @Test
+    void shouldRejectBalanceHistoryForMissingAccount() {
+
+        Pageable pageable = PageRequest.of(0, 20);
+
+        when(accountRepository.existsById(999L))
+                .thenReturn(false);
+
+        AccountBusinessException exception = assertThrows(
+                AccountBusinessException.class,
+                () -> balanceOperationService
+                        .getAccountBalanceOperations(
+                                999L,
+                                null,
+                                null,
+                                null,
+                                pageable
+                        )
+        );
+
+        assertEquals(
+                ErrorCode.ACCOUNT_NOT_FOUND,
+                exception.getErrorCode()
+        );
+        assertEquals(
+                "Account not found with ID: 999",
+                exception.getMessage()
+        );
+
+        verify(accountRepository).existsById(999L);
+        verifyNoInteractions(balanceOperationRepository);
+    }
+
+    @Test
+    void shouldRejectBalanceHistoryWhenDateRangeIsInvalid() {
+
+        LocalDateTime fromDate =
+                LocalDateTime.of(2026, 10, 3, 0, 0);
+
+        LocalDateTime toDate =
+                LocalDateTime.of(2026, 9, 1, 0, 0);
+
+        Pageable pageable = PageRequest.of(0, 20);
+
+        AccountBusinessException exception = assertThrows(
+                AccountBusinessException.class,
+                () -> balanceOperationService
+                        .getAccountBalanceOperations(
+                                21L,
+                                null,
+                                fromDate,
+                                toDate,
+                                pageable
+                        )
+        );
+
+        assertEquals(
+                ErrorCode.INVALID_REQUEST,
+                exception.getErrorCode()
+        );
+        assertEquals(
+                "fromDate must not be after toDate",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(accountRepository);
+        verifyNoInteractions(balanceOperationRepository);
+    }
+
+    @Test
+    void shouldRejectBalanceHistoryForInvalidAccountId() {
+
+        Pageable pageable = PageRequest.of(0, 20);
+
+        AccountBusinessException exception = assertThrows(
+                AccountBusinessException.class,
+                () -> balanceOperationService
+                        .getAccountBalanceOperations(
+                                0L,
+                                null,
+                                null,
+                                null,
+                                pageable
+                        )
+        );
+
+        assertEquals(
+                ErrorCode.INVALID_REQUEST,
+                exception.getErrorCode()
+        );
+        assertEquals(
+                "Account ID must be greater than zero",
+                exception.getMessage()
+        );
+
+        verifyNoInteractions(accountRepository);
+        verifyNoInteractions(balanceOperationRepository);
+    }
+
+    private BalanceOperation historyOperation(
+            Long balanceOperationId,
+            String operationReference,
+            BalanceOperationType operationType,
+            String amount,
+            String balanceBefore,
+            String balanceAfter,
+            LocalDateTime createdAt) {
+
+        return BalanceOperation.builder()
+                .balanceOperationId(balanceOperationId)
+                .operationReference(operationReference)
+                .transactionReference(
+                        "550e8400-e29b-41d4-a716-446655440099"
+                )
+                .accountId(21L)
+                .operationType(operationType)
+                .amount(new BigDecimal(amount))
+                .balanceBefore(new BigDecimal(balanceBefore))
+                .balanceAfter(new BigDecimal(balanceAfter))
+                .requestHash(
+                        "12345678901234567890123456789012"
+                                + "12345678901234567890123456789012"
+                )
+                .description("Day 24 balance-history test")
+                .createdAt(createdAt)
+                .build();
     }
 }

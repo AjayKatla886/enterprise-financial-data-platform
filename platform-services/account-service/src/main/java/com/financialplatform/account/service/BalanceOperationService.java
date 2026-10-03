@@ -16,6 +16,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.financialplatform.account.specification.BalanceOperationSpecification;
+import com.financialplatform.common.response.PageResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -398,6 +402,103 @@ public class BalanceOperationService {
                                         + normalizedOperationReference
                         )
                 );
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<BalanceOperationResponse>
+    getAccountBalanceOperations(
+            Long accountId,
+            BalanceOperationType operationType,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Pageable pageable) {
+
+        validateBalanceHistoryRequest(
+                accountId,
+                fromDate,
+                toDate,
+                pageable
+        );
+
+        /*
+         * Confirm that the account exists before searching its ledger.
+         * This distinguishes an unknown account from an account that
+         * exists but has no balance operations.
+         */
+        if (!accountRepository.existsById(accountId)) {
+            throw accountNotFound(accountId);
+        }
+
+        Page<BalanceOperation> operationPage =
+                balanceOperationRepository.findAll(
+                        BalanceOperationSpecification.withFilters(
+                                accountId,
+                                operationType,
+                                fromDate,
+                                toDate
+                        ),
+                        pageable
+                );
+
+        Page<BalanceOperationResponse> responsePage =
+                operationPage.map(
+                        BalanceOperationResponse::from
+                );
+
+        log.info(
+                "Account balance history retrieved. "
+                        + "accountId={}, operationType={}, "
+                        + "fromDate={}, toDate={}, page={}, size={}, "
+                        + "totalElements={}",
+                accountId,
+                operationType,
+                fromDate,
+                toDate,
+                pageable.getPageNumber(),
+                pageable.getPageSize(),
+                responsePage.getTotalElements()
+        );
+
+        return new PageResponse<>(
+                responsePage.getContent(),
+                responsePage.getNumber(),
+                responsePage.getSize(),
+                responsePage.getTotalElements(),
+                responsePage.getTotalPages(),
+                responsePage.isFirst(),
+                responsePage.isLast()
+        );
+    }
+
+    private void validateBalanceHistoryRequest(
+            Long accountId,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Pageable pageable) {
+
+        if (accountId == null || accountId <= 0) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Account ID must be greater than zero"
+            );
+        }
+
+        if (fromDate != null
+                && toDate != null
+                && fromDate.isAfter(toDate)) {
+
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "fromDate must not be after toDate"
+            );
+        }
+
+        if (pageable == null) {
+            throw new AccountBusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "Pagination information is required"
+            );
+        }
     }
 
     private BalanceOperation buildBalanceOperation(
