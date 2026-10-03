@@ -25,6 +25,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import com.financialplatform.account.dto.AccountStatementResponse;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -1168,5 +1169,354 @@ class BalanceOperationServiceTest {
                 .description("Day 24 balance-history test")
                 .createdAt(createdAt)
                 .build();
+    }
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldGenerateAccountStatement() {
+
+        LocalDateTime fromDate =
+                LocalDateTime.of(
+                        2026,
+                        9,
+                        1,
+                        0,
+                        0
+                );
+
+        LocalDateTime toDate =
+                LocalDateTime.of(
+                        2026,
+                        9,
+                        30,
+                        23,
+                        59,
+                        59
+                );
+
+        Pageable pageable = PageRequest.of(
+                0,
+                20,
+                Sort.by(
+                        Sort.Direction.DESC,
+                        "createdAt"
+                ).and(
+                        Sort.by(
+                                Sort.Direction.DESC,
+                                "balanceOperationId"
+                        )
+                )
+        );
+
+        Account account = buildAccount(
+                21L,
+                new BigDecimal("450.00"),
+                AccountStatus.ACTIVE
+        );
+
+        BalanceOperation debitOperation =
+                historyOperation(
+                        1L,
+                        "statement-debit-001",
+                        BalanceOperationType.DEBIT,
+                        "100.00",
+                        "500.00",
+                        "400.00",
+                        LocalDateTime.of(
+                                2026,
+                                9,
+                                10,
+                                10,
+                                0
+                        )
+                );
+
+        BalanceOperation creditOperation =
+                historyOperation(
+                        2L,
+                        "statement-credit-001",
+                        BalanceOperationType.CREDIT,
+                        "50.00",
+                        "400.00",
+                        "450.00",
+                        LocalDateTime.of(
+                                2026,
+                                9,
+                                15,
+                                11,
+                                0
+                        )
+                );
+
+        when(accountRepository.findById(21L))
+                .thenReturn(Optional.of(account));
+
+        when(balanceOperationRepository
+                .findFirstByAccountIdAndCreatedAtBetweenOrderByCreatedAtAscBalanceOperationIdAsc(
+                        21L,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(Optional.of(debitOperation));
+
+        when(balanceOperationRepository
+                .findFirstByAccountIdAndCreatedAtBetweenOrderByCreatedAtDescBalanceOperationIdDesc(
+                        21L,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(Optional.of(creditOperation));
+
+        when(balanceOperationRepository
+                .findFirstByAccountIdAndCreatedAtLessThanOrderByCreatedAtDescBalanceOperationIdDesc(
+                        21L,
+                        fromDate
+                ))
+                .thenReturn(Optional.empty());
+
+        when(balanceOperationRepository
+                .sumAmountByAccountAndTypeAndPeriod(
+                        21L,
+                        BalanceOperationType.CREDIT,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(new BigDecimal("50.00"));
+
+        when(balanceOperationRepository
+                .sumAmountByAccountAndTypeAndPeriod(
+                        21L,
+                        BalanceOperationType.DEBIT,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(new BigDecimal("100.00"));
+
+        when(balanceOperationRepository
+                .countByAccountAndTypeAndPeriod(
+                        21L,
+                        BalanceOperationType.CREDIT,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(1L);
+
+        when(balanceOperationRepository
+                .countByAccountAndTypeAndPeriod(
+                        21L,
+                        BalanceOperationType.DEBIT,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(1L);
+
+        when(balanceOperationRepository.findAll(
+                any(Specification.class),
+                eq(pageable)
+        )).thenReturn(
+                new PageImpl<>(
+                        List.of(
+                                creditOperation,
+                                debitOperation
+                        ),
+                        pageable,
+                        2
+                )
+        );
+
+        AccountStatementResponse result =
+                balanceOperationService.getAccountStatement(
+                        21L,
+                        fromDate,
+                        toDate,
+                        pageable
+                );
+
+        assertEquals(21L, result.accountId());
+        assertEquals("0000000021", result.accountNumber());
+        assertEquals("SAVINGS", result.accountType());
+
+        assertMoneyEquals(
+                "500.00",
+                result.openingBalance()
+        );
+
+        assertMoneyEquals(
+                "450.00",
+                result.closingBalance()
+        );
+
+        assertMoneyEquals(
+                "50.00",
+                result.totalCredits()
+        );
+
+        assertMoneyEquals(
+                "100.00",
+                result.totalDebits()
+        );
+
+        assertEquals(1L, result.creditCount());
+        assertEquals(1L, result.debitCount());
+        assertEquals(2, result.operations().content().size());
+        assertEquals(2L, result.operations().totalElements());
+
+        assertEquals(
+                "statement-credit-001",
+                result.operations()
+                        .content()
+                        .get(0)
+                        .operationReference()
+        );
+
+        verify(accountRepository).findById(21L);
+    }
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldRejectInconsistentStatementLedger() {
+
+        LocalDateTime fromDate =
+                LocalDateTime.of(
+                        2026,
+                        9,
+                        1,
+                        0,
+                        0
+                );
+
+        LocalDateTime toDate =
+                LocalDateTime.of(
+                        2026,
+                        9,
+                        30,
+                        23,
+                        59,
+                        59
+                );
+
+        Pageable pageable =
+                PageRequest.of(0, 20);
+
+        Account account = buildAccount(
+                21L,
+                new BigDecimal("450.00"),
+                AccountStatus.ACTIVE
+        );
+
+        BalanceOperation firstOperation =
+                historyOperation(
+                        1L,
+                        "inconsistent-debit-001",
+                        BalanceOperationType.DEBIT,
+                        "100.00",
+                        "500.00",
+                        "400.00",
+                        LocalDateTime.of(
+                                2026,
+                                9,
+                                10,
+                                10,
+                                0
+                        )
+                );
+
+        BalanceOperation lastOperation =
+                historyOperation(
+                        2L,
+                        "inconsistent-credit-001",
+                        BalanceOperationType.CREDIT,
+                        "50.00",
+                        "400.00",
+                        "475.00",
+                        LocalDateTime.of(
+                                2026,
+                                9,
+                                15,
+                                11,
+                                0
+                        )
+                );
+
+        when(accountRepository.findById(21L))
+                .thenReturn(Optional.of(account));
+
+        when(balanceOperationRepository
+                .findFirstByAccountIdAndCreatedAtBetweenOrderByCreatedAtAscBalanceOperationIdAsc(
+                        21L,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(Optional.of(firstOperation));
+
+        when(balanceOperationRepository
+                .findFirstByAccountIdAndCreatedAtBetweenOrderByCreatedAtDescBalanceOperationIdDesc(
+                        21L,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(Optional.of(lastOperation));
+
+        when(balanceOperationRepository
+                .findFirstByAccountIdAndCreatedAtLessThanOrderByCreatedAtDescBalanceOperationIdDesc(
+                        21L,
+                        fromDate
+                ))
+                .thenReturn(Optional.empty());
+
+        when(balanceOperationRepository
+                .sumAmountByAccountAndTypeAndPeriod(
+                        21L,
+                        BalanceOperationType.CREDIT,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(new BigDecimal("50.00"));
+
+        when(balanceOperationRepository
+                .sumAmountByAccountAndTypeAndPeriod(
+                        21L,
+                        BalanceOperationType.DEBIT,
+                        fromDate,
+                        toDate
+                ))
+                .thenReturn(new BigDecimal("100.00"));
+
+        when(balanceOperationRepository
+                .countByAccountAndTypeAndPeriod(
+                        eq(21L),
+                        any(BalanceOperationType.class),
+                        eq(fromDate),
+                        eq(toDate)
+                ))
+                .thenReturn(1L);
+
+        when(balanceOperationRepository.findAll(
+                any(Specification.class),
+                eq(pageable)
+        )).thenReturn(
+                new PageImpl<>(
+                        List.of(
+                                lastOperation,
+                                firstOperation
+                        ),
+                        pageable,
+                        2
+                )
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> balanceOperationService
+                        .getAccountStatement(
+                                21L,
+                                fromDate,
+                                toDate,
+                                pageable
+                        )
+        );
+
+        assertEquals(
+                "Account statement ledger is inconsistent",
+                exception.getMessage()
+        );
     }
 }
