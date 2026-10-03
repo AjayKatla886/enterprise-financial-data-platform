@@ -1,0 +1,221 @@
+# Day 25 Notes — Account Statement Summary API
+
+## Goal
+
+Day 25 implemented a proper account-statement API using the immutable account balance-operation ledger created in previous days.
+
+The statement summarizes account activity for a requested date range and returns the underlying operations with pagination.
+
+## Endpoint
+
+```http
+GET /api/v1/accounts/{accountId}/statement
+```
+
+Example:
+
+```http
+GET /api/v1/accounts/21/statement?fromDate=2026-09-01T00:00:00&toDate=2026-09-30T23:59:59&page=0&size=20
+```
+
+## Statement response
+
+The API returns:
+
+- Account ID
+- Account number
+- Account type
+- Statement start date
+- Statement end date
+- Opening balance
+- Closing balance
+- Total credits
+- Total debits
+- Credit count
+- Debit count
+- Paginated balance operations
+
+## Files changed
+
+### Created
+
+```text
+AccountStatementResponse.java
+```
+
+This DTO represents the complete statement response.
+
+### Updated
+
+```text
+BalanceOperationRepository.java
+BalanceOperationService.java
+AccountBalanceHistoryController.java
+BalanceOperationServiceTest.java
+```
+
+## Repository queries
+
+New repository queries retrieve:
+
+- Most recent operation before the statement period
+- First operation within the period
+- Last operation within the period
+- Total credit amount
+- Total debit amount
+- Credit count
+- Debit count
+
+The statement is calculated from ledger records instead of trusting only the current account balance.
+
+## Opening-balance calculation
+
+The opening balance is determined using:
+
+1. The `balanceBefore` of the first operation in the selected period
+2. Otherwise, the `balanceAfter` of the latest operation before the period
+3. Otherwise, zero when the account has no previous ledger activity
+
+## Closing-balance calculation
+
+The closing balance is:
+
+1. The `balanceAfter` of the final operation in the period
+2. The opening balance when the period contains no operations
+
+## Financial integrity rule
+
+Every generated statement validates:
+
+```text
+Opening balance
++ Total credits
+- Total debits
+= Closing balance
+```
+
+If this equation fails, the service rejects the statement instead of returning inconsistent financial data.
+
+## Verified account statement
+
+Account `21` returned:
+
+```text
+Account number: 0000000002
+Account type: CHECKING
+Opening balance: 0
+Total credits: 605
+Total debits: 425
+Closing balance: 180
+Credit count: 6
+Debit count: 3
+Operations: 9
+```
+
+Verification:
+
+```text
+0 + 605 - 425 = 180
+```
+
+## Ledger sequence
+
+```text
+0   + 500 = 500
+500 - 100 = 400
+400 - 300 = 100
+100 + 50  = 150
+150 - 25  = 125
+125 + 10  = 135
+135 + 10  = 145
+145 + 10  = 155
+155 + 25  = 180
+```
+
+The complete balance chain is consistent.
+
+## Validation
+
+The API validates:
+
+- Account ID must be positive
+- Account must exist
+- `fromDate` is required
+- `toDate` is required
+- `fromDate` must not be after `toDate`
+- Statement period must not exceed 366 days
+- Pagination information is required
+- Page number cannot be negative
+- Page size must be between 1 and 100
+
+## Empty statement behavior
+
+When an account has no operations in the requested period:
+
+```text
+totalCredits = 0
+totalDebits = 0
+creditCount = 0
+debitCount = 0
+openingBalance = closingBalance
+operations = empty page
+```
+
+The previous ledger balance is used for both opening and closing balances.
+
+## Pagination and ordering
+
+Statement operations are ordered using:
+
+```text
+createdAt DESC
+balanceOperationId DESC
+```
+
+This provides newest-first and deterministic results.
+
+## Tests added
+
+Tests cover:
+
+- Statement containing debit and credit operations
+- Opening-balance calculation
+- Closing-balance calculation
+- Credit and debit totals
+- Credit and debit counts
+- Empty statement period
+- Previous-balance lookup
+- Pagination
+- Missing account
+- Invalid date range
+- Ledger inconsistency detection
+
+## Concepts learned
+
+- Financial statement calculations
+- Ledger-derived balances
+- Aggregate JPQL queries
+- Date-range queries
+- `Optional` fallback logic
+- Paginated statement entries
+- Financial integrity validation
+- Empty-period handling
+- Read-only transactions
+- Deterministic ordering
+
+## Future connection
+
+Day 25 provides the reusable statement engine for:
+
+```text
+Monthly scheduler
+→ Spring Batch
+→ Statement calculation
+→ PDF generation
+→ S3 storage
+→ Kafka statement event
+→ Customer notification
+→ Angular statement download
+```
+
+PDF generation, S3 storage and Control-M/EventBridge scheduling will be implemented in later project phases.
