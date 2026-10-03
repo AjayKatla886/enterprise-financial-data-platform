@@ -1,0 +1,273 @@
+# Day 23 Notes — Manual Review Resolution Workflow
+
+## Objective
+
+Day 23 implemented a controlled workflow for resolving transactions that remain uncertain after automatic reconciliation.
+
+These transactions have the status:
+
+```java
+MANUAL_REVIEW
+```
+
+An operations user can now investigate the Account Service ledger and resolve the transaction as:
+
+```text
+MANUAL_REVIEW → COMPLETED
+```
+
+or:
+
+```text
+MANUAL_REVIEW → FAILED
+```
+
+## Why manual review is required
+
+Transaction Service may lose connectivity while Account Service is processing a balance operation.
+
+In that situation, Transaction Service cannot safely assume that:
+
+- The operation completed
+- The operation failed
+- Money should be moved again
+
+Automatic reconciliation checks the Account Service ledger several times. If the result remains uncertain after the maximum attempts, the transaction moves to:
+
+```java
+MANUAL_REVIEW
+```
+
+Day 23 provides the controlled final-resolution process.
+
+## New request DTO
+
+Created:
+
+```text
+ManualReviewResolutionRequest
+```
+
+Fields:
+
+```java
+TransactionStatus resolutionStatus
+String reason
+```
+
+Validation rules:
+
+- `resolutionStatus` is required
+- `reason` is required
+- `reason` cannot be blank
+- `reason` cannot exceed 500 characters
+
+Although the field uses `TransactionStatus`, the service accepts only:
+
+```java
+COMPLETED
+FAILED
+```
+
+## Repository locking
+
+Added:
+
+```java
+findByTransactionReferenceForUpdate(...)
+```
+
+It uses:
+
+```java
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+```
+
+This locks the transaction row while the manual decision is processed.
+
+It prevents two operations users from resolving the same transaction simultaneously with different results.
+
+Example prevented scenario:
+
+```text
+User 1 → COMPLETED
+User 2 → FAILED
+```
+
+The first request obtains the lock and finishes. The second request reads the new final status and is rejected.
+
+## Service implementation
+
+Added:
+
+```java
+resolveManualReview(...)
+```
+
+The method performs these operations:
+
+1. Validates and normalizes the transaction reference.
+2. Validates the request.
+3. Allows only `COMPLETED` or `FAILED`.
+4. Validates and trims the resolution reason.
+5. Locks and retrieves the transaction.
+6. Confirms that its current status is `MANUAL_REVIEW`.
+7. Updates the failure reason.
+8. Calls the centralized status-transition service.
+9. Records the decision in transaction audit history.
+10. Commits the resolution atomically.
+
+## Failure-reason behavior
+
+When resolved as `FAILED`:
+
+```java
+transaction.setFailureReason(reason);
+```
+
+The operations decision becomes the final failure reason.
+
+When resolved as `COMPLETED`:
+
+```java
+transaction.setFailureReason(null);
+```
+
+The earlier reconciliation warning is cleared because the transaction was confirmed successful.
+
+## Transactional consistency
+
+The resolution method uses:
+
+```java
+@Transactional
+```
+
+The complete flow happens in one database transaction:
+
+```text
+Acquire row lock
+→ validate current status
+→ update failure reason
+→ update transaction status
+→ insert audit-history row
+→ commit
+```
+
+If any step fails, all changes roll back.
+
+## Audit-history integration
+
+The Day 22 transition service is used:
+
+```java
+transactionStatusTransitionService.transition(...)
+```
+
+The transition source is:
+
+```java
+TransactionTransitionSource.MANUAL_REVIEW
+```
+
+Example audit record:
+
+```text
+Previous status: MANUAL_REVIEW
+New status: COMPLETED
+Source: MANUAL_REVIEW
+Reason: Account Service ledger confirms completion
+```
+
+## New API endpoint
+
+Added:
+
+```http
+POST /api/v1/transactions/{transactionReference}/manual-review
+```
+
+Successful resolution request:
+
+```json
+{
+  "resolutionStatus": "COMPLETED",
+  "reason": "Account Service ledger confirms that the balance operation completed"
+}
+```
+
+Failed resolution request:
+
+```json
+{
+  "resolutionStatus": "FAILED",
+  "reason": "Account Service ledger confirms that no balance operation was completed"
+}
+```
+
+## Business protections
+
+The workflow rejects:
+
+- Missing transaction references
+- Missing request bodies
+- Blank reasons
+- Reasons longer than 500 characters
+- Unsupported final statuses
+- Transactions not currently in `MANUAL_REVIEW`
+- Missing transactions
+- Repeated resolution attempts
+
+## Testing
+
+Added tests for:
+
+- Resolving manual review as `COMPLETED`
+- Resolving manual review as `FAILED`
+- Clearing an earlier failure reason after successful resolution
+- Preserving the final failure reason
+- Rejecting non-manual-review transactions
+- Rejecting unsupported final statuses
+- Rejecting blank reasons
+- Rejecting missing transactions
+- Ensuring the transition source is `MANUAL_REVIEW`
+
+## Swagger verification
+
+The workflow was tested by searching:
+
+```http
+GET /api/v1/transactions?status=MANUAL_REVIEW
+```
+
+The selected transaction was:
+
+```text
+Transaction ID: 45
+Reference: 3979eaef-fb9b-4808-a982-b0089a5055e7
+Status: MANUAL_REVIEW
+Type: DEPOSIT
+Amount: 100 USD
+```
+
+It was resolved through the new endpoint and verified through the history API.
+
+## Oracle verification
+
+The transaction record was checked for:
+
+```text
+TRANSACTION_STATUS = COMPLETED
+FAILURE_REASON      = NULL
+```
+
+The audit-history table was checked for:
+
+```text
+MANUAL_REVIEW → COMPLETED
+Transition source: MANUAL_REVIEW
+```
+
+## Interview explanation
+
+“On Day 23, I implemented a controlled manual-review resolution workflow for transactions whose results could not be confirmed through automatic reconciliation. I added pessimistic row locking to prevent concurrent conflicting decisions, restricted final outcomes to completed or failed, required an operations reason, and executed the status update and audit-history insertion in one database transaction. I also added validation, duplicate-resolution protection, Swagger documentation, and unit tests.”
