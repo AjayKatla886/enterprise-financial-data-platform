@@ -1,0 +1,220 @@
+# Day 26 Notes — Account Ledger Integrity Audit
+
+## Goal
+
+Day 26 implemented an internal, read-only audit API that verifies whether an account’s balance and complete balance-operation ledger remain financially consistent.
+
+The audit detects problems but never automatically modifies financial records.
+
+## Endpoint
+
+```http
+GET /internal/api/v1/accounts/{accountId}/ledger-integrity
+```
+
+Example:
+
+```http
+GET /internal/api/v1/accounts/21/ledger-integrity
+```
+
+## Files created
+
+```text
+LedgerIntegrityStatus.java
+LedgerIntegrityResponse.java
+AccountLedgerIntegrityService.java
+AccountLedgerIntegrityController.java
+AccountLedgerIntegrityServiceTest.java
+```
+
+## File updated
+
+```text
+BalanceOperationRepository.java
+```
+
+A paginated account-ledger query was added.
+
+## Integrity statuses
+
+| Status | Meaning |
+|---|---|
+| `VALID` | Ledger calculations, continuity and account balance are correct |
+| `NO_ACTIVITY` | Account has no ledger records and its balance is zero |
+| `INVALID` | At least one integrity check failed |
+
+## Audit checks
+
+### Operation calculation
+
+Every credit must satisfy:
+
+```text
+balanceBefore + amount = balanceAfter
+```
+
+Every debit must satisfy:
+
+```text
+balanceBefore - amount = balanceAfter
+```
+
+Example:
+
+```text
+Credit: 100 + 50 = 150
+Debit:  150 - 25 = 125
+```
+
+### Ledger-chain continuity
+
+Each operation must start where the previous operation ended:
+
+```text
+Previous balanceAfter = Next balanceBefore
+```
+
+Valid chain:
+
+```text
+0 → 500
+500 → 400
+400 → 100
+```
+
+Invalid chain:
+
+```text
+0 → 500
+450 → 400
+```
+
+The second operation incorrectly begins at `450`.
+
+### Stored-balance comparison
+
+The last operation’s `balanceAfter` must match the balance stored in `ACCOUNTS`:
+
+```text
+Latest ledger balanceAfter = ACCOUNTS.BALANCE
+```
+
+## Batched processing
+
+The audit reads ledger records in batches of 500:
+
+```text
+Page 0 → operations 1–500
+Page 1 → operations 501–1000
+Page 2 → operations 1001–1500
+```
+
+This avoids loading an account’s complete transaction history into memory.
+
+## Stable chronological ordering
+
+Operations are processed using:
+
+```text
+createdAt ASC
+balanceOperationId ASC
+```
+
+The operation ID provides deterministic ordering when timestamps are equal.
+
+## Response information
+
+The response contains:
+
+- Account ID
+- Account number
+- Stored account balance
+- Ledger closing balance
+- Operation count
+- Balance-match result
+- Ledger-chain result
+- Operation-calculation result
+- Overall integrity status
+- Detected issues
+- Audit timestamp
+
+## Issue reporting
+
+Detected issues can include:
+
+```text
+Invalid balance calculation for operation ...
+Ledger chain break between operations ... and ...
+Stored account balance does not match ledger closing balance
+Account has a non-zero balance but no ledger operations
+```
+
+The response limits detailed issues to prevent extremely large payloads.
+
+## Safety decision
+
+The audit is detection-only.
+
+It does not:
+
+- Update the account balance
+- Rewrite ledger records
+- Delete incorrect records
+- Insert fake correction records
+- Automatically hide inconsistencies
+
+Correct production process:
+
+```text
+Detect problem
+→ Alert operations
+→ Investigate
+→ Identify root cause
+→ Create approved adjustment or reversal
+→ Preserve audit history
+```
+
+## REVERSAL handling
+
+A reversal cannot be fully validated until it is linked to its original ledger operation.
+
+For now:
+
+- Direct reversal requests remain blocked.
+- An encountered reversal cannot be considered mathematically verified.
+- Original-operation linkage will be implemented with the formal reversal workflow.
+
+## Tests implemented
+
+Unit tests cover:
+
+- Fully valid ledger
+- Ledger-chain break
+- Invalid credit or debit calculation
+- Stored account-balance mismatch
+- Zero-balance account with no activity
+- Non-zero account with no ledger
+- Missing account
+- Invalid account ID
+
+## Concepts learned
+
+- Financial ledger reconciliation
+- Balance-chain validation
+- Data-integrity auditing
+- Batched database processing
+- Stable pagination
+- Detection versus correction
+- Operational APIs
+- Financial audit evidence
+- Safe handling of inconsistent data
+- Unit testing financial failures without corrupting Oracle data
+
+## Interview explanation
+
+> I implemented a read-only ledger-integrity audit for the Account Service. It reads balance operations chronologically in batches, validates each debit and credit calculation, checks continuity between adjacent operations, and verifies that the latest ledger balance matches the account’s stored balance. It reports detailed discrepancies without automatically modifying financial data, because corrections must occur through approved and auditable adjustments or reversals.
+
+## Day 26 outcome
+
+The platform can now prove whether an account’s stored balance is supported by a mathematically valid and continuous transaction ledger.
