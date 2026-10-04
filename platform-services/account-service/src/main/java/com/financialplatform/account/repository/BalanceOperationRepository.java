@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -65,6 +67,20 @@ public interface BalanceOperationRepository
             Long accountId,
             LocalDateTime fromDate,
             LocalDateTime toDate
+    );
+
+    /*
+     * Retrieves an account's ledger operations in pages.
+     * The service supplies stable chronological sorting using:
+     *
+     * createdAt ASC, balanceOperationId ASC
+     *
+     * Pagination prevents the integrity audit from loading an account's
+     * entire transaction history into memory at once.
+     */
+    Page<BalanceOperation> findByAccountId(
+            Long accountId,
+            Pageable pageable
     );
 
     @Query("""
