@@ -44,16 +44,57 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(AccountBusinessException.class)
-    public ResponseEntity<ErrorResponse> handleAccountBusinessException(
+    public ResponseEntity<ErrorResponse>
+    handleAccountBusinessException(
             AccountBusinessException ex,
             HttpServletRequest request) {
 
-        HttpStatus status = mapBusinessErrorStatus(
-                ex.getErrorCode()
-        );
+        HttpStatus status =
+                switch (ex.getErrorCode()) {
+
+                    case ACCOUNT_NOT_FOUND,
+                         BALANCE_OPERATION_NOT_FOUND,
+                         ACCOUNT_HOLD_NOT_FOUND ->
+                            HttpStatus.NOT_FOUND;
+
+                    case INVALID_REQUEST,
+                         VALIDATION_ERROR ->
+                            HttpStatus.BAD_REQUEST;
+
+                    case DUPLICATE_ACCOUNT_TYPE,
+                         INVALID_ACCOUNT_STATE,
+                         ACCOUNT_ALREADY_CLOSED,
+                         CUSTOMER_KYC_NOT_VERIFIED,
+                         INSUFFICIENT_FUNDS,
+                         BALANCE_OPERATION_IDEMPOTENCY_CONFLICT,
+                         ACCOUNT_HOLD_IDEMPOTENCY_CONFLICT,
+                         INSUFFICIENT_AVAILABLE_BALANCE ->
+                            HttpStatus.CONFLICT;
+
+                    default ->
+                            HttpStatus.INTERNAL_SERVER_ERROR;
+                };
+
+        if (status == HttpStatus.INTERNAL_SERVER_ERROR) {
+
+            log.error(
+                    "Unmapped account business error. "
+                            + "errorCode={}",
+                    ex.getErrorCode(),
+                    ex
+            );
+
+            return buildErrorResponse(
+                    status,
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                    "An unexpected error occurred",
+                    request
+            );
+        }
 
         log.warn(
-                "Account business rule rejected. errorCode={}, status={}, message={}",
+                "Account business rule rejected. "
+                        + "errorCode={}, status={}, message={}",
                 ex.getErrorCode().getCode(),
                 status.value(),
                 ex.getMessage()

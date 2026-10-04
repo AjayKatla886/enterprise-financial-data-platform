@@ -1,0 +1,119 @@
+## Day 27 Notes — Account Holds and Available Balance
+
+### What we implemented
+
+Day 27 introduced the account-hold foundation used by banking systems to reserve funds without immediately debiting an account.
+
+Examples include:
+
+- Card authorization holds
+- Hotel and rental-car deposits
+- Pending merchant payments
+- Scheduled transfers
+- Temporary fund reservations
+
+### Balance model
+
+```text
+Available Balance = Ledger Balance − Active Holds
+```
+
+Example:
+
+```text
+Ledger balance:     $180
+Active holds:        $50
+Available balance:  $130
+```
+
+Creating a hold does not change the account’s ledger balance.
+
+### Main components
+
+- `AccountHold` entity
+- `AccountHoldStatus` enum
+- `AccountHoldRepository`
+- `AccountHoldRequest`
+- `AccountHoldResponse`
+- `AccountBalanceSummaryResponse`
+- `AccountHoldService`
+- `AccountHoldController`
+- `AccountBalanceSummaryController`
+- `V5__create_account_holds.sql`
+- `AccountHoldServiceTest`
+
+### Hold lifecycle
+
+The supported statuses are:
+
+- `ACTIVE` — money is reserved.
+- `CAPTURED` — reserved money has been debited.
+- `RELEASED` — reservation was cancelled.
+- `EXPIRED` — reservation automatically expired.
+
+Day 27 implemented creation and retrieval of `ACTIVE` holds. Capture, release and automatic expiration can be added in the following days.
+
+### Concurrency protection
+
+The account is retrieved using a pessimistic write lock:
+
+```java
+accountRepository.findByIdForUpdate(accountId)
+```
+
+This serializes concurrent hold requests for the same account and prevents multiple requests from reserving more money than is available.
+
+### Idempotency
+
+The `Hold-Reference` header uniquely identifies a hold request.
+
+- Same reference and same request → return the existing hold.
+- Same reference and different request → return `ACC-010`.
+- A database unique constraint provides the final duplicate protection.
+
+### Business validations
+
+The service verifies:
+
+- Account exists.
+- Account is active.
+- Hold reference is present and within the allowed length.
+- Amount is positive.
+- Expiration is in the future.
+- Available balance is sufficient.
+- An existing reference was not reused with different data.
+
+### New error codes
+
+```text
+ACC-009 — Account hold not found
+ACC-010 — Hold idempotency conflict
+ACC-011 — Insufficient available balance
+```
+
+### APIs implemented
+
+```http
+POST /internal/api/v1/accounts/{accountId}/holds
+GET  /internal/api/v1/accounts/holds/{holdReference}
+GET  /api/v1/accounts/{accountId}/balance-summary
+```
+
+### Testing completed
+
+We verified:
+
+- Successful hold creation
+- Available-balance calculation
+- Ledger balance remains unchanged
+- Safe idempotent retry
+- Idempotency conflict
+- Insufficient available balance
+- Hold retrieval
+- Missing hold response
+- Database constraint and persistence behavior
+- Complete Maven build
+
+### Day 27 outcome
+
+The Account Service can now safely reserve funds while preserving the immutable balance-operation ledger. This provides the foundation for card authorizations and other pending-payment workflows.
